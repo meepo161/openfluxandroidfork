@@ -71,19 +71,44 @@ public final class OpenFluxProxyService extends Service {
         }
     };
 
+    // 0 means "currently connected" - see OpenFluxTunnelService's identical
+    // field for why, and for the Kill Switch off grace-period watchdog this
+    // feeds below.
+    private volatile long disconnectedSinceMs;
+    private static final long KILL_SWITCH_GRACE_MS = 30_000;
+
     // healthChecker keeps "Подключено" honest for the same reason as in
     // OpenFluxTunnelService: once set at initial connect, status would never
-    // reflect a later drop in the underlying transport without this.
+    // reflect a later drop in the underlying transport without this. Also
+    // implements the same Kill Switch off opt-out: stop the local proxy
+    // after a prolonged drop instead of leaving it up (and refusing/hanging
+    // new connections) indefinitely.
     private final Runnable healthChecker = new Runnable() {
         @Override public void run() {
             if (running) {
                 boolean connected = Mobile.proxyIsConnected();
-                if (!connected && "Подключено".equals(status)) {
-                    status = "Подключение…";
-                    lastError = "Транспорт отключился, переподключение…";
-                } else if (connected && "Подключение…".equals(status)) {
-                    status = "Подключено";
-                    lastError = "Транспорт восстановлен";
+                if (!connected) {
+                    long now = SystemClock.elapsedRealtime();
+                    if (disconnectedSinceMs == 0L) disconnectedSinceMs = now;
+                    boolean killSwitch = getSharedPreferences(MainActivity.SETTINGS_PREFS_NAME, MODE_PRIVATE)
+                            .getBoolean("kill_switch", true);
+                    if (!killSwitch && now - disconnectedSinceMs >= KILL_SWITCH_GRACE_MS) {
+                        lastError = "Не удалось переподключиться - прокси остановлен, Kill Switch выключен";
+                        stopProxy();
+                        return;
+                    }
+                    if ("Подключено".equals(status)) {
+                        status = "Подключение…";
+                    }
+                    lastError = killSwitch
+                            ? "Kill Switch: новые соединения блокируются, переподключение…"
+                            : "Транспорт отключился, переподключение…";
+                } else {
+                    disconnectedSinceMs = 0L;
+                    if ("Подключение…".equals(status)) {
+                        status = "Подключено";
+                        lastError = "Транспорт восстановлен";
+                    }
                 }
             }
             notificationHandler.postDelayed(this, 2000);
@@ -106,6 +131,7 @@ public final class OpenFluxProxyService extends Service {
         lastSampledSent = 0;
         lastSampledReceived = 0;
         lastSampledAt = SystemClock.elapsedRealtime();
+        disconnectedSinceMs = 0L;
         notificationHandler.removeCallbacks(speedUpdater);
         notificationHandler.post(speedUpdater);
         notificationHandler.removeCallbacks(healthChecker);

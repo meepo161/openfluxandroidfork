@@ -68,6 +68,11 @@ public final class OpenFluxTunnelService extends VpnService {
     private final AtomicLong bytesSent = new AtomicLong();
     private final AtomicLong bytesReceived = new AtomicLong();
     private final Handler notificationHandler = new Handler(Looper.getMainLooper());
+    // 0 means "currently connected" - set the first time healthChecker
+    // observes a drop, used to measure how long we've been down for the
+    // Kill Switch off opt-out watchdog below.
+    private volatile long disconnectedSinceMs;
+    private static final long KILL_SWITCH_GRACE_MS = 30_000;
     private long lastSampledSent;
     private long lastSampledReceived;
     private long lastSampledAt;
@@ -95,16 +100,38 @@ public final class OpenFluxTunnelService extends VpnService {
     // actually being dropped (Mobile.send fails silently, so nothing leaks
     // unencrypted - the TUN just stops passing data). This surfaces that
     // state honestly instead of just failing silently.
+    //
+    // It also implements the Kill Switch opt-out: with it on (default) the
+    // above drop-not-leak behavior is simply left alone. With it off, a
+    // watchdog here tears the tunnel down after KILL_SWITCH_GRACE_MS of
+    // continuous disconnection, restoring normal device routing instead of
+    // blocking network access indefinitely.
     private final Runnable healthChecker = new Runnable() {
         @Override public void run() {
             if (running) {
                 boolean connected = Mobile.isConnected();
-                if (!connected && "Подключено".equals(status)) {
-                    status = "Подключение…";
-                    lastError = "Транспорт отключился, переподключение…";
-                } else if (connected && "Подключение…".equals(status) && active) {
-                    status = "Подключено";
-                    lastError = "Транспорт восстановлен";
+                if (!connected) {
+                    long now = SystemClock.elapsedRealtime();
+                    if (disconnectedSinceMs == 0L) disconnectedSinceMs = now;
+                    boolean killSwitch = getSharedPreferences(MainActivity.SETTINGS_PREFS_NAME, MODE_PRIVATE)
+                            .getBoolean("kill_switch", true);
+                    if (!killSwitch && now - disconnectedSinceMs >= KILL_SWITCH_GRACE_MS) {
+                        lastError = "Не удалось переподключиться - туннель отключён, Kill Switch выключен";
+                        stopTunnel();
+                        return;
+                    }
+                    if ("Подключено".equals(status)) {
+                        status = "Подключение…";
+                    }
+                    lastError = killSwitch
+                            ? "Kill Switch: трафик заблокирован, переподключение…"
+                            : "Транспорт отключился, переподключение…";
+                } else {
+                    disconnectedSinceMs = 0L;
+                    if ("Подключение…".equals(status) && active) {
+                        status = "Подключено";
+                        lastError = "Транспорт восстановлен";
+                    }
                 }
             }
             notificationHandler.postDelayed(this, 2000);
@@ -128,6 +155,7 @@ public final class OpenFluxTunnelService extends VpnService {
         lastSampledSent = 0;
         lastSampledReceived = 0;
         lastSampledAt = SystemClock.elapsedRealtime();
+        disconnectedSinceMs = 0L;
         notificationHandler.removeCallbacks(speedUpdater);
         notificationHandler.post(speedUpdater);
         notificationHandler.removeCallbacks(healthChecker);
