@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -222,7 +223,13 @@ func (t *TCPTunnel) DialTCP(address string) (net.Conn, error) {
 		nic = tcpip.NICID(2)
 	}
 
-	conn, err := gonet.DialTCP(t.gvisorStack, tcpip.FullAddress{
+	// Bounded, not gonet.DialTCP's unbounded wait: if the transport is down
+	// (kill-switch territory - see tunnel.go's DialTCP callers), a TCP
+	// handshake over it never completes, and callers would otherwise hang
+	// indefinitely instead of getting a clean "connection failed".
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := gonet.DialContextTCP(ctx, t.gvisorStack, tcpip.FullAddress{
 		NIC:  nic,
 		Addr: tcpip.AddrFrom4([4]byte{ip[0], ip[1], ip[2], ip[3]}),
 		Port: uint16(port),
