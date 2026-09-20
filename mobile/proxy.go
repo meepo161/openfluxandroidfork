@@ -9,6 +9,7 @@ package mobile
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"openflux/socks5"
@@ -39,7 +40,10 @@ type proxyState struct {
 // is non-empty, the SOCKS5 server requires that username/password (e.g. for
 // a proxy bound to 0.0.0.0 and reachable from the local network); an empty
 // username leaves it open, as appropriate for a loopback-only bind.
-func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid, listenAddr, username, password string) string {
+// bypassDomains is a newline-separated list (from the Android "Маршрутизация"
+// settings tab) of domains to dial directly instead of through the tunnel;
+// pass "" for none.
+func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid, listenAddr, username, password, bypassDomains string) string {
 	if transportType == "" {
 		transportType = "yandex"
 	}
@@ -110,7 +114,11 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 	}
 
 	tun := tunnel.NewTCPTunnel(trans, false)
-	server := socks5.NewSOCKS5Server(listenAddr, tun)
+	var dialer socks5.Dialer = tun
+	if strings.TrimSpace(bypassDomains) != "" {
+		dialer = newSplitDialer(tun, strings.Split(bypassDomains, "\n"))
+	}
+	server := socks5.NewSOCKS5Server(listenAddr, dialer)
 	if username != "" {
 		server.SetAuth(username, password)
 	}

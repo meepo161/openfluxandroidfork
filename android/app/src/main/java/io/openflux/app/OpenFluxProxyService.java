@@ -6,12 +6,14 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
 
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -207,10 +209,21 @@ public final class OpenFluxProxyService extends Service {
         return START_STICKY;
     }
 
+    // Newline-joined domain list for the enabled "Маршрутизация" presets +
+    // custom domains, passed to Mobile.startProxy's splitDialer. Read fresh
+    // on every start so a settings change takes effect on the next connect.
+    private String resolveBypassDomains() {
+        SharedPreferences prefs = getSharedPreferences(DomainFilter.PREFS_NAME, MODE_PRIVATE);
+        Set<String> presets = DomainFilter.loadEnabledPresets(prefs);
+        Set<String> custom = DomainFilter.loadCustomDomains(prefs);
+        return String.join("\n", DomainFilter.resolveDomains(this, presets, custom));
+    }
+
     private void startProxyTransport(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String bindHost, int port,
             String username, String password, int session) {
         if (!isCurrent(session)) return;
-        String error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, bindHost + ":" + port, username, password);
+        String error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, bindHost + ":" + port, username, password,
+                resolveBypassDomains());
         if (error != null && !error.isEmpty()) {
             fail(session, error);
             return;
