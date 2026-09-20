@@ -189,6 +189,7 @@ public final class MainActivity extends Activity {
     private PopupWindow profileDropdown;
     private String dnsServer;
     private int mtu;
+    private boolean killSwitchEnabled = true;
     private String connectionMode = MODE_TUNNEL;
     private int proxyPort = DEFAULT_PROXY_PORT;
     private boolean proxyLanAccess;
@@ -202,6 +203,7 @@ public final class MainActivity extends Activity {
     private String editorDnsServer = "";
     private boolean editorDnsAuto = true;
     private int editorMtu;
+    private boolean editorKillSwitchEnabled = true;
     private String editorConnectionMode = MODE_TUNNEL;
     private int editorProxyPort = DEFAULT_PROXY_PORT;
     private boolean editorProxyLanAccess;
@@ -260,6 +262,7 @@ public final class MainActivity extends Activity {
         applySelectedProfileToFields();
         dnsServer = prefs.getString("dns_server", "");
         mtu = prefs.getInt("mtu", DEFAULT_MTU);
+        killSwitchEnabled = prefs.getBoolean("kill_switch", true);
         connectionMode = MODE_PROXY.equals(prefs.getString("connection_mode", MODE_TUNNEL)) ? MODE_PROXY : MODE_TUNNEL;
         proxyPort = prefs.getInt("proxy_port", DEFAULT_PROXY_PORT);
         proxyLanAccess = prefs.getBoolean("proxy_lan_access", false);
@@ -708,6 +711,7 @@ public final class MainActivity extends Activity {
             editorDnsServer = dnsServer;
             editorDnsAuto = dnsServer.isEmpty();
             editorMtu = mtu;
+            editorKillSwitchEnabled = killSwitchEnabled;
         } else if (tab == SETTINGS_MODE) {
             editorConnectionMode = connectionMode;
             editorProxyPort = proxyPort;
@@ -2108,6 +2112,21 @@ public final class MainActivity extends Activity {
                         + "уменьшите (например, до 1280), если сайты грузятся не полностью "
                         + "или соединение обрывается."));
 
+        Switch killSwitchSwitch = settingSwitch(R.drawable.ic_lock, "Kill Switch",
+                "Блокировать трафик, если туннель отключился, вместо пропуска мимо него",
+                editorKillSwitchEnabled);
+        killSwitchSwitch.setOnCheckedChangeListener((button, checked) -> {
+            tap(button);
+            editorKillSwitchEnabled = checked;
+        });
+        LinearLayout.LayoutParams killSwitchParams = matchWrap();
+        killSwitchParams.topMargin = dp(16);
+        section.addView((View) killSwitchSwitch.getTag(), killSwitchParams);
+        section.addView(fieldHint(
+                "Включено: при обрыве соединения приложения теряют доступ в сеть, а не "
+                        + "продолжают работать в обход туннеля. Выключено: примерно через 30 "
+                        + "секунд без связи туннель отключится сам и сеть заработает как обычно."));
+
         return section;
     }
 
@@ -2123,6 +2142,7 @@ public final class MainActivity extends Activity {
             newMtu = DEFAULT_MTU;
         }
         mtu = Math.max(576, Math.min(1500, newMtu));
+        killSwitchEnabled = editorKillSwitchEnabled;
         persistSettings();
     }
 
@@ -2566,6 +2586,7 @@ public final class MainActivity extends Activity {
                 .remove("connection_document_url")
                 .putString("dns_server", dnsServer)
                 .putInt("mtu", mtu)
+                .putBoolean("kill_switch", killSwitchEnabled)
                 .putString("connection_mode", connectionMode)
                 .putInt("proxy_port", proxyPort)
                 .putBoolean("proxy_lan_access", proxyLanAccess)
