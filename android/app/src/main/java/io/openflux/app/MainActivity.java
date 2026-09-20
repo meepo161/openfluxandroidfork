@@ -114,6 +114,7 @@ public final class MainActivity extends Activity {
     private static final int SETTINGS_APPS = 2;
     private static final int SETTINGS_INTERFACE = 3;
     private static final int SETTINGS_ABOUT = 4;
+    private static final int SETTINGS_ROUTING = 5;
     private static final String[] PROFILE_ICON_KEYS = {
             "ic_public", "ic_link", "ic_lock", "ic_key", "ic_power",
             "ic_person", "ic_swap", "ic_terminal", "ic_apps", "ic_settings",
@@ -234,6 +235,11 @@ public final class MainActivity extends Activity {
     private SharedPreferences appFilterPrefs;
     private String appFilterMode = AppFilter.MODE_OFF;
     private final LinkedHashSet<String> selectedApps = new LinkedHashSet<>();
+    private SharedPreferences domainFilterPrefs;
+    private final LinkedHashSet<String> enabledDomainPresets = new LinkedHashSet<>();
+    private final LinkedHashSet<String> customDomains = new LinkedHashSet<>();
+    private final LinkedHashSet<String> editorEnabledDomainPresets = new LinkedHashSet<>();
+    private EditText customDomainsInput;
     private List<AppEntry> installedAppsCache;
 
     private final Runnable refresh = new Runnable() {
@@ -277,6 +283,9 @@ public final class MainActivity extends Activity {
         appFilterPrefs = getSharedPreferences(AppFilter.PREFS_NAME, MODE_PRIVATE);
         appFilterMode = appFilterPrefs.getString(AppFilter.KEY_MODE, AppFilter.MODE_OFF);
         selectedApps.addAll(appFilterPrefs.getStringSet(AppFilter.KEY_PACKAGES, Collections.emptySet()));
+        domainFilterPrefs = getSharedPreferences(DomainFilter.PREFS_NAME, MODE_PRIVATE);
+        enabledDomainPresets.addAll(DomainFilter.loadEnabledPresets(domainFilterPrefs));
+        customDomains.addAll(DomainFilter.loadCustomDomains(domainFilterPrefs));
         appVersion = readAppVersion();
         applyPalette();
         configureSystemBars();
@@ -725,6 +734,9 @@ public final class MainActivity extends Activity {
             editorAppFilterMode = appFilterMode;
             editorSelectedApps.clear();
             editorSelectedApps.addAll(selectedApps);
+        } else if (tab == SETTINGS_ROUTING) {
+            editorEnabledDomainPresets.clear();
+            editorEnabledDomainPresets.addAll(enabledDomainPresets);
         }
         showPage(PAGE_SETTINGS);
     }
@@ -1184,6 +1196,7 @@ public final class MainActivity extends Activity {
                 else if (settingsSubTab == SETTINGS_MODE) applyModeSettings();
                 else if (settingsSubTab == SETTINGS_INTERFACE) applyInterfaceSettings();
                 else if (settingsSubTab == SETTINGS_APPS) applyAppsSettings();
+                else if (settingsSubTab == SETTINGS_ROUTING) applyRoutingSettings();
                 Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
             });
             LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
@@ -1229,6 +1242,7 @@ public final class MainActivity extends Activity {
         switch (tab) {
             case SETTINGS_NETWORK: return "Сеть";
             case SETTINGS_APPS: return "Приложения";
+            case SETTINGS_ROUTING: return "Маршрутизация";
             case SETTINGS_INTERFACE: return "Вид";
             case SETTINGS_ABOUT: return "О проекте";
             case SETTINGS_MODE:
@@ -1252,6 +1266,9 @@ public final class MainActivity extends Activity {
         addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_apps, "Приложения",
                 "Какие приложения используют туннель", SETTINGS_APPS));
+        addDivider(list);
+        list.addView(settingsListRow(R.drawable.ic_public, "Маршрутизация",
+                "Сайты и сервисы в обход туннеля", SETTINGS_ROUTING));
         addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_dark_mode, "Вид",
                 "Тема и автопрокрутка логов", SETTINGS_INTERFACE));
@@ -1303,6 +1320,8 @@ public final class MainActivity extends Activity {
                 return wrapScroll(buildNetworkSettings());
             case SETTINGS_APPS:
                 return buildAppsSettings();
+            case SETTINGS_ROUTING:
+                return wrapScroll(buildRoutingSettings());
             case SETTINGS_INTERFACE:
                 return wrapScroll(buildInterfaceSettings());
             case SETTINGS_ABOUT:
@@ -2163,6 +2182,69 @@ public final class MainActivity extends Activity {
         selectedApps.clear();
         selectedApps.addAll(editorSelectedApps);
         persistAppFilter();
+    }
+
+    private View buildRoutingSettings() {
+        LinearLayout section = page();
+        TextView routingHint = text(
+                "Домены и сервисы ниже подключаются напрямую, в обход туннеля - полезно для "
+                        + "локальных сервисов и всего, что чувствительно к задержке.",
+                12, secondary, false);
+        section.addView(routingHint, matchWrap());
+
+        for (int i = 0; i < DomainFilter.PRESETS.length; i++) {
+            DomainFilter.Preset preset = DomainFilter.PRESETS[i];
+            Switch presetSwitch = settingSwitch(R.drawable.ic_public, preset.title, preset.description,
+                    editorEnabledDomainPresets.contains(preset.id));
+            presetSwitch.setOnCheckedChangeListener((button, checked) -> {
+                tap(button);
+                if (checked) editorEnabledDomainPresets.add(preset.id);
+                else editorEnabledDomainPresets.remove(preset.id);
+            });
+            LinearLayout.LayoutParams presetParams = matchWrap();
+            presetParams.topMargin = i == 0 ? dp(12) : dp(8);
+            section.addView((View) presetSwitch.getTag(), presetParams);
+        }
+
+        LinearLayout.LayoutParams customLabelParams = matchWrap();
+        customLabelParams.topMargin = dp(16);
+        section.addView(text("Свои домены", 13, secondary, false), customLabelParams);
+
+        customDomainsInput = new EditText(this);
+        customDomainsInput.setHint("youtube.com\nexample.org");
+        customDomainsInput.setHintTextColor(hint);
+        customDomainsInput.setText(String.join("\n", customDomains));
+        customDomainsInput.setTextSize(14);
+        customDomainsInput.setTextColor(text);
+        customDomainsInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        customDomainsInput.setMinLines(3);
+        customDomainsInput.setGravity(Gravity.TOP | Gravity.START);
+        customDomainsInput.setBackground(rounded(surface, border, 1, 10));
+        customDomainsInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams customInputParams = matchWrap();
+        customInputParams.topMargin = dp(6);
+        section.addView(customDomainsInput, customInputParams);
+        section.addView(fieldHint("По одному домену на строку, без http:// и путей - например youtube.com."));
+
+        return section;
+    }
+
+    private void applyRoutingSettings() {
+        enabledDomainPresets.clear();
+        enabledDomainPresets.addAll(editorEnabledDomainPresets);
+        customDomains.clear();
+        for (String line : customDomainsInput.getText().toString().split("\n")) {
+            String trimmed = line.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!trimmed.isEmpty()) customDomains.add(trimmed);
+        }
+        persistDomainFilter();
+    }
+
+    private void persistDomainFilter() {
+        domainFilterPrefs.edit()
+                .putStringSet(DomainFilter.KEY_ENABLED_PRESETS, new HashSet<>(enabledDomainPresets))
+                .putStringSet(DomainFilter.KEY_CUSTOM_DOMAINS, new HashSet<>(customDomains))
+                .apply();
     }
 
     private TextView fieldHint(String value) {
