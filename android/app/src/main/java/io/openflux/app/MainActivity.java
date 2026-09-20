@@ -169,6 +169,7 @@ public final class MainActivity extends Activity {
     private ImageView tunnelPowerIcon;
     private TextView tunnelButtonText;
     private TextView uptimeView;
+    private TextView speedView;
     private View ringWave;
     private String documentUrl;
     private String encryptionSecret;
@@ -1024,6 +1025,12 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams uptimeParams = matchWrap();
         uptimeParams.topMargin = dp(2);
         tunnelButton.addView(uptimeView, uptimeParams);
+        speedView = text("", 10, Color.WHITE, false);
+        speedView.setAlpha(0.7f);
+        speedView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams speedParams = matchWrap();
+        speedParams.topMargin = dp(2);
+        tunnelButton.addView(speedView, speedParams);
         tunnelButton.setOnClickListener(v -> {
             bounce(v);
             toggleConnection();
@@ -2801,9 +2808,15 @@ public final class MainActivity extends Activity {
             // reserves its height, which pushes the icon+status above dead
             // center in the button while there's no time to show yet.
             uptimeView.setVisibility(View.GONE);
+            speedView.setVisibility(View.GONE);
         } else {
             uptimeView.setVisibility(View.VISIBLE);
             uptimeView.setText(formatUptime(System.currentTimeMillis() - connectedAt));
+            long sentPerSec = proxyMode ? OpenFluxProxyService.getSentPerSec() : OpenFluxTunnelService.getSentPerSec();
+            long receivedPerSec = proxyMode ? OpenFluxProxyService.getReceivedPerSec() : OpenFluxTunnelService.getReceivedPerSec();
+            speedView.setVisibility(View.VISIBLE);
+            speedView.setText("↑ " + OpenFluxTunnelService.formatSpeed(sentPerSec)
+                    + "   ↓ " + OpenFluxTunnelService.formatSpeed(receivedPerSec));
         }
 
         if (state != null && !state.equals(lastAnnouncedState)) {
@@ -2850,6 +2863,7 @@ public final class MainActivity extends Activity {
         int contentColor = idle ? text : Color.WHITE;
         tunnelButtonText.setTextColor(contentColor);
         uptimeView.setTextColor(contentColor);
+        speedView.setTextColor(contentColor);
         if (tunnelPowerIcon != null) {
             tunnelPowerIcon.setImageTintList(ColorStateList.valueOf(contentColor));
         }

@@ -57,14 +57,18 @@ public final class OpenFluxProxyService extends Service {
     private long lastSampledSent;
     private long lastSampledReceived;
     private long lastSampledAt;
+    // Read by MainActivity's Home screen (getSentPerSec/getReceivedPerSec)
+    // to show live speed there too, not just in the notification.
+    private static volatile long sentPerSec;
+    private static volatile long receivedPerSec;
     private final Runnable speedUpdater = new Runnable() {
         @Override public void run() {
             long now = SystemClock.elapsedRealtime();
             long elapsedMs = Math.max(1, now - lastSampledAt);
             long sent = Mobile.proxyBytesSent();
             long received = Mobile.proxyBytesReceived();
-            long sentPerSec = (sent - lastSampledSent) * 1000 / elapsedMs;
-            long receivedPerSec = (received - lastSampledReceived) * 1000 / elapsedMs;
+            sentPerSec = (sent - lastSampledSent) * 1000 / elapsedMs;
+            receivedPerSec = (received - lastSampledReceived) * 1000 / elapsedMs;
             lastSampledSent = sent;
             lastSampledReceived = received;
             lastSampledAt = now;
@@ -122,6 +126,8 @@ public final class OpenFluxProxyService extends Service {
     public static String getLastError() { return lastError; }
     public static int getActivePort() { return activePort; }
     public static long getConnectedAtMillis() { return connectedAtMillis; }
+    public static long getSentPerSec() { return sentPerSec; }
+    public static long getReceivedPerSec() { return receivedPerSec; }
 
     private static String formatSpeed(long bytesPerSecond) {
         if (bytesPerSecond < 1024) return bytesPerSecond + " Б/с";
@@ -143,6 +149,8 @@ public final class OpenFluxProxyService extends Service {
     private void stopSpeedUpdates() {
         notificationHandler.removeCallbacks(speedUpdater);
         notificationHandler.removeCallbacks(healthChecker);
+        sentPerSec = 0;
+        receivedPerSec = 0;
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }

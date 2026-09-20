@@ -76,14 +76,18 @@ public final class OpenFluxTunnelService extends VpnService {
     private long lastSampledSent;
     private long lastSampledReceived;
     private long lastSampledAt;
+    // Read by MainActivity's Home screen (getSentPerSec/getReceivedPerSec)
+    // to show live speed there too, not just in the notification.
+    private static volatile long sentPerSec;
+    private static volatile long receivedPerSec;
     private final Runnable speedUpdater = new Runnable() {
         @Override public void run() {
             long now = SystemClock.elapsedRealtime();
             long elapsedMs = Math.max(1, now - lastSampledAt);
             long sent = bytesSent.get();
             long received = bytesReceived.get();
-            long sentPerSec = (sent - lastSampledSent) * 1000 / elapsedMs;
-            long receivedPerSec = (received - lastSampledReceived) * 1000 / elapsedMs;
+            sentPerSec = (sent - lastSampledSent) * 1000 / elapsedMs;
+            receivedPerSec = (received - lastSampledReceived) * 1000 / elapsedMs;
             lastSampledSent = sent;
             lastSampledReceived = received;
             lastSampledAt = now;
@@ -142,8 +146,12 @@ public final class OpenFluxTunnelService extends VpnService {
     public static String getStatus() { return status; }
     public static String getLastError() { return lastError; }
     public static long getConnectedAtMillis() { return connectedAtMillis; }
+    public static long getSentPerSec() { return sentPerSec; }
+    public static long getReceivedPerSec() { return receivedPerSec; }
 
-    private static String formatSpeed(long bytesPerSecond) {
+    // Package-private so MainActivity's Home screen can format the same
+    // numbers this service already tracks (getSentPerSec/getReceivedPerSec).
+    static String formatSpeed(long bytesPerSecond) {
         if (bytesPerSecond < 1024) return bytesPerSecond + " Б/с";
         if (bytesPerSecond < 1024 * 1024) return String.format(Locale.US, "%.0f КБ/с", bytesPerSecond / 1024.0);
         return String.format(Locale.US, "%.1f МБ/с", bytesPerSecond / (1024.0 * 1024.0));
@@ -165,6 +173,8 @@ public final class OpenFluxTunnelService extends VpnService {
     private void stopSpeedUpdates() {
         notificationHandler.removeCallbacks(speedUpdater);
         notificationHandler.removeCallbacks(healthChecker);
+        sentPerSec = 0;
+        receivedPerSec = 0;
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
