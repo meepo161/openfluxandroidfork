@@ -2192,6 +2192,16 @@ public final class MainActivity extends Activity {
                 12, secondary, false);
         section.addView(routingHint, matchWrap());
 
+        if (!isProxyMode()) {
+            TextView tunnelNote = text(
+                    "Пока работает только в режиме Прокси (SOCKS5). В режиме Туннель настройки "
+                            + "сохранятся, но не применяются - переключите режим работы, чтобы им пользоваться.",
+                    12, accent, false);
+            LinearLayout.LayoutParams tunnelNoteParams = matchWrap();
+            tunnelNoteParams.topMargin = dp(8);
+            section.addView(tunnelNote, tunnelNoteParams);
+        }
+
         for (int i = 0; i < DomainFilter.PRESETS.length; i++) {
             DomainFilter.Preset preset = DomainFilter.PRESETS[i];
             Switch presetSwitch = settingSwitch(R.drawable.ic_public, preset.title, preset.description,
