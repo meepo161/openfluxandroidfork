@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.p1neapplexpress.openflux"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10101
-        versionName = "1.1.1-session"
+        versionCode = 10102
+        versionName = "1.1.2-session"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
