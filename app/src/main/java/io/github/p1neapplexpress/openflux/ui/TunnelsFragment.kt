@@ -31,6 +31,7 @@ import io.github.g00fy2.quickie.ScanQRCode
 import io.github.p1neapplexpress.openflux.R
 import io.github.p1neapplexpress.openflux.data.Tunnel
 import io.github.p1neapplexpress.openflux.data.TunnelState
+import io.github.p1neapplexpress.openflux.data.YandexCookieStore
 import io.github.p1neapplexpress.openflux.event.AppEvent
 import io.github.p1neapplexpress.openflux.ui.widget.AuroraView
 import io.github.p1neapplexpress.openflux.ui.widget.PulseRingsView
@@ -62,6 +63,24 @@ class TunnelsFragment : BaseFragment() {
 
     /** Tunnel to start once the VPN permission dialog returns; null starts the selected one. */
     private var pendingStart: Tunnel? = null
+    private var pendingCookieStart: Tunnel? = null
+
+    private val cookiePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val tunnel = pendingCookieStart
+        pendingCookieStart = null
+        if (uri == null) return@registerForActivityResult
+        val imported = runCatching {
+            requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                YandexCookieStore.save(input, requireContext().noBackupFilesDir)
+            } ?: error("Cannot open selected file")
+        }
+        imported.onSuccess {
+            Toast.makeText(requireContext(), R.string.yandex_session_imported, Toast.LENGTH_SHORT).show()
+            if (tunnel != null) requestVpnAndStart(tunnel)
+        }.onFailure {
+            Toast.makeText(requireContext(), R.string.yandex_session_import_failed, Toast.LENGTH_LONG).show()
+        }
+    }
 
     private val vpnPermission = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -134,6 +153,12 @@ class TunnelsFragment : BaseFragment() {
     }
 
     private fun requestVpnAndStart(tunnel: Tunnel? = null) {
+        val selected = tunnel ?: vm.selected.value
+        if (selected?.transportType == "vyandex" && YandexCookieStore.existing(requireContext().noBackupFilesDir) == null) {
+            pendingCookieStart = selected
+            cookiePicker.launch(arrayOf("*/*"))
+            return
+        }
         val intent = VpnService.prepare(requireActivity())
         when {
             intent != null -> {
@@ -266,6 +291,16 @@ class TunnelsFragment : BaseFragment() {
                 .replace(R.id.main, AddTunFragment.edit(tunnel))
                 .addToBackStack("edit")
                 .commit()
+        }
+
+        menuView.findViewById<View>(R.id.menu_yandex_session).apply {
+            isVisible = tunnel.transportType == "vyandex"
+            setOnClickListener {
+                menu.dismiss()
+                popup?.dismiss()
+                pendingCookieStart = null
+                cookiePicker.launch(arrayOf("*/*"))
+            }
         }
 
         menuView.findViewById<View>(R.id.menu_delete).setOnClickListener {

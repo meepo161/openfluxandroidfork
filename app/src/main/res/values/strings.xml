@@ -36,6 +36,9 @@
 
     <string name="vpn_permission_required">Allow VPN permission to start transport / tun2socks</string>
     <string name="qr_scan_failed">QR code scan failed</string>
+    <string name="yandex_session_import">Import Yandex session</string>
+    <string name="yandex_session_imported">Yandex session imported</string>
+    <string name="yandex_session_import_failed">Could not import Yandex session file</string>
     <string name="name_required">Enter a tunnel name</string>
 
     <string name="add_tunnel">Add tunnel</string>

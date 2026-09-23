@@ -36,6 +36,9 @@
 
     <string name="vpn_permission_required">Разрешите VPN для запуска транспорта и tun2socks</string>
     <string name="qr_scan_failed">Не удалось отсканировать QR-код</string>
+    <string name="yandex_session_import">Импорт сессии Яндекса</string>
+    <string name="yandex_session_imported">Сессия Яндекса импортирована</string>
+    <string name="yandex_session_import_failed">Не удалось импортировать файл сессии Яндекса</string>
     <string name="name_required">Введите имя туннеля</string>
 
     <string name="add_tunnel">Добавить туннель</string>

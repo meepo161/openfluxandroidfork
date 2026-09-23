@@ -54,4 +54,26 @@ class NativeArgsTest {
         )
         assertEquals(listOf("--maxToken=***"), NativeArgs.redact(listOf("--maxToken=secret")))
     }
+
+    @Test
+    fun `vyandex uses only app owned cookie file`() {
+        val payload = listOf("--transport", "vyandex", "--url", "https://d", "--yandex-cookies-file=/sdcard/untrusted")
+        assertEquals(
+            listOf(
+                "--role", "client", "--inbound", "socks5", "--socks5", socks,
+                "--yandex-cookies-file", "/data/private/cookies.txt",
+                "--transport", "vyandex", "--url", "https://d",
+            ),
+            NativeArgs.build(payload, socks, keyFile = null, cookieFile = "/data/private/cookies.txt"),
+        )
+    }
+
+    @Test
+    fun `other transports do not receive Yandex cookie file`() {
+        val payload = listOf("--transport", "mailru", "--url", "https://d", "--yandex-cookies-file", "/sdcard/untrusted")
+        assertEquals(
+            listOf("--role", "client", "--inbound", "socks5", "--socks5", socks, "--transport", "mailru", "--url", "https://d"),
+            NativeArgs.build(payload, socks, keyFile = null, cookieFile = "/data/private/cookies.txt"),
+        )
+    }
 }

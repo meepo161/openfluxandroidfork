@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import io.github.p1neapplexpress.openflux.data.EncryptionKey
+import io.github.p1neapplexpress.openflux.data.TunnelPayload
+import io.github.p1neapplexpress.openflux.data.YandexCookieStore
 import io.github.p1neapplexpress.openflux.event.AppEvent
 import io.github.p1neapplexpress.openflux.event.EventBus
 import io.github.p1neapplexpress.openflux.util.Logx
@@ -80,7 +82,10 @@ class NativeProcessSupervisor(
 
             socksPort = Loopback.freeTcpPort()
             val keyPath = encryptionKey?.let(::writeKey)
-            val args = NativeArgs.build(payload, "127.0.0.1:$socksPort", keyPath)
+            val cookiePath = if (TunnelPayload.value(payload, "transport") == "vyandex") {
+                YandexCookieStore.existing(context.noBackupFilesDir)?.absolutePath
+            } else null
+            val args = NativeArgs.build(payload, "127.0.0.1:$socksPort", keyPath, cookiePath)
             Logx.i(TAG, "exec: $NATIVE_LIB ${NativeArgs.redact(args).joinToString(" ")}")
 
             val p = ProcessBuilder(listOf("$nativeDir/$NATIVE_LIB") + args)

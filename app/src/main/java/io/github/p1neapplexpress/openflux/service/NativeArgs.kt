@@ -1,20 +1,25 @@
 package io.github.p1neapplexpress.openflux.service
 
+import io.github.p1neapplexpress.openflux.data.TunnelPayload
+
 /** Builds the OpenFlux client command line from a stored tunnel payload. */
 object NativeArgs {
 
     // Flags the app always sets itself; copies inside a stored payload are dropped.
-    private val OWNED_WITH_VALUE = setOf("role", "r", "inbound", "i", "socks5", "s", "encryption-key-file")
+    private val OWNED_WITH_VALUE = setOf("role", "r", "inbound", "i", "socks5", "s", "encryption-key-file", "yandex-cookies-file")
     private val OWNED_BOOLEAN = setOf("client", "exit-node", "tun", "socks5-mode")
 
     private val SECRET_VALUES = setOf("maxToken")
 
-    fun build(payload: List<String>, socksAddress: String, keyFile: String?): List<String> = buildList {
+    fun build(payload: List<String>, socksAddress: String, keyFile: String?, cookieFile: String? = null): List<String> = buildList {
         add("--role"); add("client")
         add("--inbound"); add("socks5")
         add("--socks5"); add(socksAddress)
         if (keyFile != null) {
             add("--encryption-key-file"); add(keyFile)
+        }
+        if (cookieFile != null && TunnelPayload.value(payload, "transport") == "vyandex") {
+            add("--yandex-cookies-file"); add(cookieFile)
         }
 
         var i = 0
