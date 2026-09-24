@@ -806,13 +806,7 @@ public final class MainActivity extends Activity {
     }
 
     private String transportLabel(String type) {
-        if ("direct".equals(type)) return "Direct (TCP до ноды)";
-        if ("vyandex".equals(type)) return "Yandex Docs (Volga)";
-        if ("boards".equals(type)) return "Yandex Board";
-        if ("mailru".equals(type)) return "Mail.ru Docs";
-        if ("cupsonline".equals(type)) return "Cups.online";
-        if ("oneme".equals(type)) return "MAX (OneMe)";
-        return "Yandex Docs";
+        return Profile.transportLabel(type);
     }
 
     private String profileTransportSummary(Profile p) {

@@ -136,6 +136,7 @@ func classicTransport(transportType, documentURL, encryptionSecret, codec, maxTo
 		return nil, err
 	}
 	attachCaptcha(transportType, documentURL, inner)
+	setClassicRoute(transportType)
 
 	// App-layer codec, same as the CLI's --codec flag. Both peers must use
 	// the same one. Applied before encryption so it compresses plaintext
@@ -209,6 +210,7 @@ func Stop() {
 	detachCaptcha()
 	CancelCaptcha()
 	setAuthProxy(nil)
+	clearRoute()
 	appendLog("[ANDROID] Остановка транспорта")
 	if trans != nil {
 		_ = trans.Stop()

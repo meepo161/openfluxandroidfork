@@ -72,7 +72,10 @@ public final class OpenFluxProxyService extends Service {
             lastSampledSent = sent;
             lastSampledReceived = received;
             lastSampledAt = now;
-            updateNotification("↑ " + formatSpeed(sentPerSec) + "   ↓ " + formatSpeed(receivedPerSec));
+            String speeds = "↑ " + formatSpeed(sentPerSec) + "   ↓ " + formatSpeed(receivedPerSec);
+            // The carrier traffic goes through right now; follows failover.
+            String carrier = Mobile.currentTransport();
+            updateNotification(carrier.isEmpty() ? speeds : speeds + " · " + Profile.transportLabel(carrier));
             notificationHandler.postDelayed(this, 1000);
         }
     };

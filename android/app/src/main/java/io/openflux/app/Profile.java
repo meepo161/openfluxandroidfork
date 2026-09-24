@@ -102,6 +102,16 @@ final class Profile {
         return p;
     }
 
+    static String transportLabel(String type) {
+        if ("direct".equals(type)) return "Direct (TCP до ноды)";
+        if ("vyandex".equals(type)) return "Yandex Docs (Volga)";
+        if ("boards".equals(type)) return "Yandex Board";
+        if ("mailru".equals(type)) return "Mail.ru Docs";
+        if ("cupsonline".equals(type)) return "Cups.online";
+        if ("oneme".equals(type)) return "MAX (OneMe)";
+        return "Yandex Docs";
+    }
+
     // Puts what both connection services need to start this profile; they
     // read the same extra keys.
     void putConnectionExtras(Intent intent) {

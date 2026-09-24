@@ -52,6 +52,9 @@ func TestBuildSessionConnectsOverDirect(t *testing.T) {
 	if err := phone.Start(); err != nil {
 		t.Fatalf("handshake over direct: %v", err)
 	}
+	if got := CurrentTransport(); got != "direct" {
+		t.Fatalf("CurrentTransport = %q, want direct", got)
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for !exit.IsConnected() {
 		if time.Now().After(deadline) {

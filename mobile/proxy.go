@@ -123,6 +123,7 @@ func StopProxy() {
 	detachCaptcha()
 	CancelCaptcha()
 	setAuthProxy(nil)
+	clearRoute()
 	appendLog("[ANDROID] Остановка прокси-транспорта")
 	if server != nil {
 		_ = server.Close()

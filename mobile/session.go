@@ -47,7 +47,9 @@ func buildSession(specsJSON, secret string) (transport.Transport, error) {
 	m := manager.New(sess, nil, secret, context)
 	config := transport.DefaultConfig()
 	keys := make(map[string]string)
+	types := make(map[string]string)
 	for _, spec := range specs {
+		types[spec.Name] = spec.Type
 		raw, err := newRawTransport(spec.Type, spec.URL, spec.Params, config)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", spec.Name, err)
@@ -65,6 +67,7 @@ func buildSession(specsJSON, secret string) (transport.Transport, error) {
 		appendLog(fmt.Sprintf("[ANDROID] Session: транспорт %s (%s), приоритет %d", spec.Name, spec.Type, spec.Priority))
 	}
 	sess.SetControlHandler(m.DispatchControl)
+	setSessionRoute(sess, types)
 
 	// The side stack for exit checks shares the tunnel; a PortDemux hands
 	// it the replies to its ports and everything else to the regular path.
