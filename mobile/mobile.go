@@ -81,6 +81,7 @@ func startPacket(build func() (transport.Transport, error)) string {
 		client.running = false
 		client.mu.Unlock()
 		detachCaptcha()
+		setAuthProxy(nil)
 		return err.Error()
 	}
 	trans, err := build()
@@ -207,6 +208,7 @@ func Stop() {
 	client.mu.Unlock()
 	detachCaptcha()
 	CancelCaptcha()
+	setAuthProxy(nil)
 	appendLog("[ANDROID] Остановка транспорта")
 	if trans != nil {
 		_ = trans.Stop()

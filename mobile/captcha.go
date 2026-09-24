@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"openflux/transport"
 	"openflux/transport/manager"
@@ -22,7 +23,19 @@ var captcha struct {
 	// apply hands cookies to the live transport that asked for them; nil
 	// once that transport stopped or failed to start.
 	apply func(map[string]string) error
+
+	// proxy is set when the check belongs to the exit (remoteName is its
+	// transport): the page must be opened through this HTTP proxy so it
+	// is passed from the exit's address, and the cookies go to the exit.
+	proxy      string
+	remoteName string
+	// snooze holds off repeated exit checks the user cancelled.
+	snooze map[string]time.Time
 }
+
+// remoteSnooze is how long a cancelled exit check stays quiet; the exit
+// repeats its report every 20-30s while stuck.
+const remoteSnooze = 10 * time.Minute
 
 // SetCookieStorePath enables persisting solved-captcha cookies across app
 // restarts. Call once before Start/StartProxy; returns "" or an error.
@@ -45,6 +58,7 @@ func attachCaptcha(transportType, documentURL string, raw transport.Transport) {
 	captcha.key = transportType + " " + documentURL
 	captcha.url = ""
 	captcha.reason = ""
+	captcha.proxy, captcha.remoteName = "", ""
 	captcha.apply = nil
 	exchanger, _ := raw.(transport.CookieExchanger)
 	if exchanger != nil {
@@ -69,9 +83,10 @@ func attachCaptcha(transportType, documentURL string, raw transport.Transport) {
 // attachSessionCaptcha does the same for a Session: the Manager reports
 // which transport needs the check, and keys maps each cookie-carrying
 // transport to its store key. Saved cookies are replayed by the Manager.
-func attachSessionCaptcha(m *manager.Manager, keys map[string]string) {
+func attachSessionCaptcha(m *manager.Manager, keys map[string]string, proxy *authProxy) {
 	captcha.mu.Lock()
 	captcha.key, captcha.url, captcha.reason, captcha.apply = "", "", "", nil
+	captcha.proxy, captcha.remoteName = "", ""
 	store := captcha.store
 	captcha.mu.Unlock()
 	if store != nil {
@@ -85,9 +100,41 @@ func attachSessionCaptcha(m *manager.Manager, keys map[string]string) {
 		appendLog(fmt.Sprintf("[ANDROID] %s: нужна проверка в браузере (%s)", name, reason))
 		captcha.mu.Lock()
 		captcha.url, captcha.reason, captcha.key = url, reason, keys[name]
+		captcha.proxy, captcha.remoteName = "", ""
 		captcha.apply = func(jar map[string]string) error { return m.ApplyCookiesFor(name, jar) }
 		captcha.mu.Unlock()
 	})
+	// A check the exit's own transport hit (AuthRequired): it has to be
+	// passed from the exit's address, so the page goes through the tunnel,
+	// and the cookies go back to the exit, which applies and keeps them.
+	m.SetRemoteAuthNotifier(func(name, url, reason string) {
+		captcha.mu.Lock()
+		quiet := captcha.url != "" || time.Now().Before(captcha.snooze[name])
+		captcha.mu.Unlock()
+		if quiet {
+			return
+		}
+		addr, err := proxy.Addr()
+		if err != nil || addr == "" {
+			appendLog(fmt.Sprintf("[ERROR] Прокси для проверки ноды: %v", err))
+			return
+		}
+		appendLog(fmt.Sprintf("[ANDROID] Нода: %s требует проверку в браузере (%s)", name, reason))
+		captcha.mu.Lock()
+		captcha.url, captcha.reason, captcha.key = url, reason, ""
+		captcha.proxy, captcha.remoteName = addr, name
+		captcha.apply = func(jar map[string]string) error { return m.OfferCookies(name, jar) }
+		captcha.mu.Unlock()
+	})
+}
+
+// PendingCaptchaProxy returns the HTTP proxy (host:port) to open the
+// pending page through when the check belongs to the exit, or "" when it
+// is the phone's own.
+func PendingCaptchaProxy() string {
+	captcha.mu.Lock()
+	defer captcha.mu.Unlock()
+	return captcha.proxy
 }
 
 // detachCaptcha drops the live transport reference, so cookies submitted
@@ -115,10 +162,18 @@ func PendingCaptchaReason() string {
 }
 
 // CancelCaptcha clears the pending check without cookies (user gave up).
+// An exit check stays quiet for a while instead of popping up again.
 func CancelCaptcha() {
 	captcha.mu.Lock()
+	if captcha.remoteName != "" {
+		if captcha.snooze == nil {
+			captcha.snooze = make(map[string]time.Time)
+		}
+		captcha.snooze[captcha.remoteName] = time.Now().Add(remoteSnooze)
+	}
 	captcha.url = ""
 	captcha.reason = ""
+	captcha.proxy, captcha.remoteName = "", ""
 	captcha.mu.Unlock()
 }
 
@@ -134,6 +189,7 @@ func SubmitCaptchaCookies(cookieHeader string) string {
 	store, key, apply := captcha.store, captcha.key, captcha.apply
 	captcha.url = ""
 	captcha.reason = ""
+	captcha.proxy, captcha.remoteName = "", ""
 	captcha.mu.Unlock()
 
 	if store != nil && key != "" {

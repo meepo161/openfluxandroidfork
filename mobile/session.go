@@ -65,9 +65,15 @@ func buildSession(specsJSON, secret string) (transport.Transport, error) {
 		appendLog(fmt.Sprintf("[ANDROID] Session: транспорт %s (%s), приоритет %d", spec.Name, spec.Type, spec.Priority))
 	}
 	sess.SetControlHandler(m.DispatchControl)
-	attachSessionCaptcha(m, keys)
+
+	// The side stack for exit checks shares the tunnel; a PortDemux hands
+	// it the replies to its ports and everything else to the regular path.
+	demux := transport.NewPortDemux(m, authProxyPortLo, authProxyPortHi)
+	proxy := &authProxy{demux: demux}
+	setAuthProxy(proxy)
+	attachSessionCaptcha(m, keys, proxy)
 	appendLog("[ANDROID] Session: шифрование AES-256-GCM, согласование с нодой")
-	return m, nil
+	return demux, nil
 }
 
 // sessionContext is the encryption context. The exit derives it from its
