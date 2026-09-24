@@ -339,7 +339,7 @@ public final class OpenFluxTunnelService extends VpnService {
                 byte[] packet = Arrays.copyOf(buffer, length);
                 if (isIpv4UdpDns(packet)) {
                     workers.execute(() -> forwardDns(session, outputFor(session), packet, dnsServer));
-                } else if (isIpv4Tcp(packet)) {
+                } else if (isIpv4Tcp(packet) || isIpv4Udp(packet)) {
                     String error = Mobile.send(packet);
                     if (error != null && !error.isEmpty() && isCurrent(session)) {
                         lastError = "Отправка пакета: " + error;
@@ -424,6 +424,15 @@ public final class OpenFluxTunnelService extends VpnService {
 
     private static boolean isIpv4Tcp(byte[] packet) {
         return packet.length >= 20 && (packet[0] >>> 4) == 4 && (packet[9] & 0xff) == 6;
+    }
+
+    // Non-DNS UDP (isIpv4UdpDns handles port 53 separately, resolved locally
+    // instead of round-tripping through the tunnel). The exit node forwards
+    // this like any other IPv4 packet; an older exit node without UDP NAT
+    // support (see tunnel/l3/udp_nat.go) just drops it, same as today.
+    private static boolean isIpv4Udp(byte[] packet) {
+        return packet.length >= 20 && (packet[0] >>> 4) == 4 && (packet[9] & 0xff) == 17
+                && !isIpv4UdpDns(packet);
     }
 
     private static boolean isIpv4UdpDns(byte[] packet) {
