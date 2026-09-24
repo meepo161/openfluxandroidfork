@@ -7,8 +7,11 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Insets;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -47,7 +50,6 @@ public final class CaptchaActivity extends Activity {
     private String proxy = "";
     private boolean proxyOverridden;
     private String currentUrl;
-    private boolean sawCheckpoint;
     private boolean submitted;
 
     static void initCookieStore(Context context) {
@@ -73,7 +75,8 @@ public final class CaptchaActivity extends Activity {
                 : (login ? "OpenFlux: нужен вход в Яндекс" : "OpenFlux: нужна проверка");
         manager.notify(NOTIFICATION_ID, new Notification.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
-                .setContentText("Нажмите, чтобы продолжить подключение")
+                .setContentText(remote ? "Нажмите, чтобы открыть проверку для ноды"
+                        : "Нажмите, чтобы продолжить подключение")
                 .setSmallIcon(R.drawable.ic_openflux_notification)
                 .setAutoCancel(true)
                 .setContentIntent(content)
@@ -132,10 +135,14 @@ public final class CaptchaActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 currentUrl = url;
-                if (isCheckpoint(url)) {
-                    sawCheckpoint = true;
-                } else if (sawCheckpoint) {
-                    submit();
+                // A real browser is often let through without any check (the
+                // captcha targets the transport's bot-like client), so any
+                // regular page counts as passed. The short delay lets a page
+                // that bounces to a check get there before we submit.
+                if (!isCheckpoint(url)) {
+                    view.postDelayed(() -> {
+                        if (!isCheckpoint(currentUrl)) submit();
+                    }, 1500);
                 }
             }
         });
@@ -144,6 +151,17 @@ public final class CaptchaActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.addView(bar);
         root.addView(web, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        // Keep the bar and the page clear of the status/navigation bars and
+        // the keyboard (edge-to-edge is enforced from Android 15).
+        if (Build.VERSION.SDK_INT >= 30) {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+                v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return WindowInsets.CONSUMED;
+            });
+        } else {
+            root.setFitsSystemWindows(true);
+        }
         setContentView(root);
         if (!remote) {
             web.loadUrl(startUrl);
