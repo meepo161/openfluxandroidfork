@@ -124,7 +124,7 @@ func TestExitCaptchaSolvedThroughTunnel(t *testing.T) {
 
 	specs := fmt.Sprintf(`[{"name":"direct","type":"direct","priority":100,"params":{"dial":%q}},
 		{"name":"yandex","type":"yandex","url":%q,"priority":50}]`, directAddr, doc)
-	phone, err := buildSession(specs, testSecret)
+	phone, err := buildSession(specs, testSecret, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,14 +40,14 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 		return msg
 	}
 	return startProxyWith(func() (transport.Transport, error) {
-		return classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid)
+		return classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid, false)
 	}, listenAddr, username, password)
 }
 
 // StartSessionProxy is StartProxy in Session mode, see StartSession.
 func StartSessionProxy(specsJSON, encryptionSecret, listenAddr, username, password string) string {
 	return startProxyWith(func() (transport.Transport, error) {
-		return buildSession(specsJSON, encryptionSecret)
+		return buildSession(specsJSON, encryptionSecret, false)
 	}, listenAddr, username, password)
 }
 

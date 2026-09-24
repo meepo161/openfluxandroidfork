@@ -44,7 +44,7 @@ func TestBuildSessionConnectsOverDirect(t *testing.T) {
 		{"name":"direct","type":"direct","priority":100,"params":{"dial":%q}},
 		{"name":"yandex","type":"yandex","url":%q,"priority":50}
 	]`, addr, doc)
-	phone, err := buildSession(specs, testSecret)
+	phone, err := buildSession(specs, testSecret, false)
 	if err != nil {
 		t.Fatal(err)
 	}

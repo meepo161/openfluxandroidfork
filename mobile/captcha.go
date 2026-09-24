@@ -104,6 +104,9 @@ func attachSessionCaptcha(m *manager.Manager, keys map[string]string, proxy *aut
 		captcha.apply = func(jar map[string]string) error { return m.ApplyCookiesFor(name, jar) }
 		captcha.mu.Unlock()
 	})
+	if proxy == nil {
+		return
+	}
 	// A check the exit's own transport hit (AuthRequired): it has to be
 	// passed from the exit's address, so the page goes through the tunnel,
 	// and the cookies go back to the exit, which applies and keeps them.

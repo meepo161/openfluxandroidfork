@@ -42,7 +42,7 @@ func CurrentTransport() string {
 		}
 		return name
 	}
-	if classic != "" && (IsConnected() || ProxyIsConnected()) {
+	if classic != "" && (IsConnected() || ProxyIsConnected() || ExitIsConnected()) {
 		return classic
 	}
 	return ""

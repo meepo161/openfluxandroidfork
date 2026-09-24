@@ -48,7 +48,7 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 		return msg
 	}
 	return startPacket(func() (transport.Transport, error) {
-		return classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid)
+		return classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid, false)
 	})
 }
 
@@ -57,7 +57,7 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 // see buildSession for specsJSON.
 func StartSession(specsJSON, encryptionSecret string) string {
 	return startPacket(func() (transport.Transport, error) {
-		return buildSession(specsJSON, encryptionSecret)
+		return buildSession(specsJSON, encryptionSecret, false)
 	})
 }
 
@@ -124,14 +124,15 @@ func validateClassic(transportType, documentURL, encryptionSecret string) string
 
 // classicTransport builds the single-transport stack: carrier, codec and
 // optional encryption, the same layering as the CLI without --negotiate.
-func classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid string) (transport.Transport, error) {
+// exit selects the exit node's side (the phone as the exit).
+func classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid string, exit bool) (transport.Transport, error) {
 	if transportType == "" {
 		transportType = "yandex"
 	}
 	appendLog(fmt.Sprintf("[ANDROID] Запуск транспорта %s", transportType))
 	config := transport.DefaultConfig()
 	inner, err := newRawTransport(transportType, documentURL,
-		map[string]interface{}{"token": maxToken, "uid": maxUid}, config)
+		map[string]interface{}{"token": maxToken, "uid": maxUid}, config, exit)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +159,7 @@ func classicTransport(transportType, documentURL, encryptionSecret, codec, maxTo
 	if documentURL != "" {
 		context = documentURL
 	}
-	encrypted, err := transport.NewEncryptedTransport(inner, encryptionSecret, context, false)
+	encrypted, err := transport.NewEncryptedTransport(inner, encryptionSecret, context, exit)
 	if err != nil {
 		return nil, err
 	}
@@ -166,10 +167,11 @@ func classicTransport(transportType, documentURL, encryptionSecret, codec, maxTo
 	return encrypted, nil
 }
 
-// newRawTransport builds one carrier, like the CLI's transportFactory for
-// the client side. params: "token"/"uid" for oneme, "dial" (host:port) for
-// direct.
-func newRawTransport(typ, url string, params map[string]interface{}, config transport.TransportConfig) (transport.Transport, error) {
+// newRawTransport builds one carrier, like the CLI's transportFactory.
+// params: "token"/"uid" for oneme, "dial" (host:port) for direct; on the
+// exit side (exit) direct listens on "listen", or on "dial" when only that
+// is set, since a profile keeps one address per transport.
+func newRawTransport(typ, url string, params map[string]interface{}, config transport.TransportConfig, exit bool) (transport.Transport, error) {
 	str := func(key string) string {
 		v, _ := params[key].(string)
 		return v
@@ -184,16 +186,25 @@ func newRawTransport(typ, url string, params map[string]interface{}, config tran
 	case "mailru":
 		return mailru.NewMailruDocsTransport(url, config), nil
 	case "cupsonline":
-		return cupsonline.NewCupsonlineTransport(url, config, true), nil
+		return cupsonline.NewCupsonlineTransport(url, config, !exit), nil
 	case "oneme":
 		uid, _ := strconv.ParseInt(str("uid"), 10, 64)
-		return oneme.NewOneMeTransport(false, str("token"), uid, config), nil
+		return oneme.NewOneMeTransport(exit, str("token"), uid, config), nil
 	case "direct":
-		if str("dial") == "" {
+		dcfg := transport.DefaultDirectConfig()
+		if exit {
+			dcfg.IsExit = true
+			if dcfg.ListenAddr = str("listen"); dcfg.ListenAddr == "" {
+				dcfg.ListenAddr = str("dial")
+			}
+			if dcfg.ListenAddr == "" {
+				return nil, fmt.Errorf("direct: не указан адрес для прослушивания (host:port)")
+			}
+			return transport.NewDirectTransport(config, dcfg), nil
+		}
+		if dcfg.DialAddr = str("dial"); dcfg.DialAddr == "" {
 			return nil, fmt.Errorf("direct: не указан адрес ноды (host:port)")
 		}
-		dcfg := transport.DefaultDirectConfig()
-		dcfg.DialAddr = str("dial")
 		return transport.NewDirectTransport(config, dcfg), nil
 	default:
 		return nil, fmt.Errorf("неизвестный тип транспорта %q", typ)

@@ -22,8 +22,9 @@ type sessionSpec struct {
 
 // buildSession mirrors the CLI client's --negotiate / --transports path, so
 // the phone talks to an exit started with the same transports and --url.
-// specsJSON is a JSON array of sessionSpec.
-func buildSession(specsJSON, secret string) (transport.Transport, error) {
+// specsJSON is a JSON array of sessionSpec. exit builds the exit node's
+// side (the phone as an l4 exit).
+func buildSession(specsJSON, secret string, exit bool) (transport.Transport, error) {
 	var specs []sessionSpec
 	if err := json.Unmarshal([]byte(specsJSON), &specs); err != nil {
 		return nil, fmt.Errorf("список транспортов: %w", err)
@@ -35,11 +36,16 @@ func buildSession(specsJSON, secret string) (transport.Transport, error) {
 		return nil, fmt.Errorf("для режима Session нужен ключ шифрования не короче 16 символов")
 	}
 
+	// Like the CLI: an l4 exit terminates flows in gVisor and has no raw
+	// ICMP errors to relay; a client does.
+	caps := transport.CapabilityIPv4 | transport.CapabilityTCP | transport.CapabilityUDP
+	if !exit {
+		caps |= transport.CapabilityICMPErrors
+	}
 	sess, err := transport.NewSession(transport.PeerParameters{
-		Capabilities: transport.CapabilityIPv4 | transport.CapabilityTCP |
-			transport.CapabilityUDP | transport.CapabilityICMPErrors,
+		Capabilities:  caps,
 		MaxPacketSize: transport.MaxNegotiatedPacket,
-	}, false)
+	}, exit)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +56,7 @@ func buildSession(specsJSON, secret string) (transport.Transport, error) {
 	types := make(map[string]string)
 	for _, spec := range specs {
 		types[spec.Name] = spec.Type
-		raw, err := newRawTransport(spec.Type, spec.URL, spec.Params, config)
+		raw, err := newRawTransport(spec.Type, spec.URL, spec.Params, config, exit)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", spec.Name, err)
 		}
@@ -68,6 +74,13 @@ func buildSession(specsJSON, secret string) (transport.Transport, error) {
 	}
 	sess.SetControlHandler(m.DispatchControl)
 	setSessionRoute(sess, types)
+	if exit {
+		// The exit relays its own checks to the client itself (AuthRequired);
+		// the phone's UI can still pass them locally.
+		attachSessionCaptcha(m, keys, nil)
+		appendLog("[ANDROID] Session: шифрование AES-256-GCM, ожидание клиента")
+		return m, nil
+	}
 
 	// The side stack for exit checks shares the tunnel; a PortDemux hands
 	// it the replies to its ports and everything else to the regular path.

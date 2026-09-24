@@ -43,11 +43,20 @@ public final class OpenFluxTileService extends TileService {
     @Override public void onClick() {
         super.onClick();
         boolean proxyMode = isProxyMode();
-        boolean running = proxyMode ? OpenFluxProxyService.isRunning() : OpenFluxTunnelService.isRunning();
+        boolean exitMode = isExitMode();
+        boolean running = exitMode ? OpenFluxExitService.isRunning()
+                : proxyMode ? OpenFluxProxyService.isRunning() : OpenFluxTunnelService.isRunning();
         if (running) {
-            Intent stop = new Intent(this, proxyMode ? OpenFluxProxyService.class : OpenFluxTunnelService.class);
-            stop.setAction(proxyMode ? OpenFluxProxyService.ACTION_STOP : OpenFluxTunnelService.ACTION_STOP);
+            Intent stop = exitMode
+                    ? new Intent(this, OpenFluxExitService.class).setAction(OpenFluxExitService.ACTION_STOP)
+                    : new Intent(this, proxyMode ? OpenFluxProxyService.class : OpenFluxTunnelService.class)
+                            .setAction(proxyMode ? OpenFluxProxyService.ACTION_STOP : OpenFluxTunnelService.ACTION_STOP);
             startService(stop);
+            updateTile();
+            return;
+        }
+        if (exitMode) {
+            if (!startExit()) openApp();
             updateTile();
             return;
         }
@@ -66,6 +75,27 @@ public final class OpenFluxTileService extends TileService {
     private boolean isProxyMode() {
         SharedPreferences prefs = getSharedPreferences(MainActivity.SETTINGS_PREFS_NAME, MODE_PRIVATE);
         return "proxy".equals(prefs.getString("connection_mode", "tunnel"));
+    }
+
+    private boolean isExitMode() {
+        SharedPreferences prefs = getSharedPreferences(MainActivity.SETTINGS_PREFS_NAME, MODE_PRIVATE);
+        return "exit".equals(prefs.getString("connection_mode", "tunnel"));
+    }
+
+    private Profile selectedProfile() {
+        ProfileStore store = new ProfileStore(new SecureSettings(this));
+        long selectedId = store.getSelectedId();
+        for (Profile p : store.load()) if (p.id == selectedId) return p;
+        return null;
+    }
+
+    private boolean startExit() {
+        Profile selected = selectedProfile();
+        if (selected == null) return false;
+        Intent intent = new Intent(this, OpenFluxExitService.class).setAction(OpenFluxExitService.ACTION_START);
+        selected.putConnectionExtras(intent);
+        startForegroundService(intent);
+        return true;
     }
 
     private boolean startConnection(boolean proxyMode) {
@@ -122,12 +152,14 @@ public final class OpenFluxTileService extends TileService {
         Tile tile = getQsTile();
         if (tile == null) return;
         boolean proxyMode = isProxyMode();
-        boolean running = proxyMode ? OpenFluxProxyService.isRunning() : OpenFluxTunnelService.isRunning();
+        boolean exitMode = isExitMode();
+        boolean running = exitMode ? OpenFluxExitService.isRunning()
+                : proxyMode ? OpenFluxProxyService.isRunning() : OpenFluxTunnelService.isRunning();
         tile.setIcon(Icon.createWithResource(this, R.drawable.ic_openflux_notification));
         tile.setLabel("OpenFlux");
         tile.setState(running ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         if (Build.VERSION.SDK_INT >= 29) {
-            tile.setSubtitle(proxyMode ? "Прокси" : "Туннель");
+            tile.setSubtitle(exitMode ? "Выходная нода" : proxyMode ? "Прокси" : "Туннель");
         }
         tile.updateTile();
     }

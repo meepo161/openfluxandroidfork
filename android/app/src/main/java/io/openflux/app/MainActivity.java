@@ -124,6 +124,8 @@ public final class MainActivity extends Activity {
     };
     private static final String MODE_TUNNEL = "tunnel";
     private static final String MODE_PROXY = "proxy";
+    // The phone serves as an l4 exit node for other clients.
+    private static final String MODE_EXIT = "exit";
     private static final int DEFAULT_PROXY_PORT = 1080;
     private static final String MAIN_REPO_URL = "https://github.com/p1neappleXpress/OpenFlux";
     private static final String FORK_REPO_URL = "https://github.com/damnurmum/OpenFlux-Android";
@@ -271,7 +273,8 @@ public final class MainActivity extends Activity {
         applySelectedProfileToFields();
         dnsServer = prefs.getString("dns_server", "");
         mtu = prefs.getInt("mtu", DEFAULT_MTU);
-        connectionMode = MODE_PROXY.equals(prefs.getString("connection_mode", MODE_TUNNEL)) ? MODE_PROXY : MODE_TUNNEL;
+        String savedMode = prefs.getString("connection_mode", MODE_TUNNEL);
+        connectionMode = MODE_PROXY.equals(savedMode) || MODE_EXIT.equals(savedMode) ? savedMode : MODE_TUNNEL;
         proxyPort = prefs.getInt("proxy_port", DEFAULT_PROXY_PORT);
         proxyLanAccess = prefs.getBoolean("proxy_lan_access", false);
         proxyAuthEnabled = prefs.getBoolean("proxy_auth_enabled", false);
@@ -1005,7 +1008,6 @@ public final class MainActivity extends Activity {
         }
         lastTunnelButtonFill = -1;
 
-        boolean proxyMode = MODE_PROXY.equals(connectionMode);
         LinearLayout page = page();
 
         // Big circular connect button: two static concentric rings (in the
@@ -1079,7 +1081,7 @@ public final class MainActivity extends Activity {
         summaryTitleParams.topMargin = dp(24);
         summaryTitleParams.bottomMargin = dp(8);
         page.addView(summaryTitle, summaryTitleParams);
-        View activeParams = paramsCard(activeParamRows(proxyMode));
+        View activeParams = paramsCard(activeParamRows());
         LinearLayout.LayoutParams activeParamsParams = matchWrap();
         activeParamsParams.bottomMargin = dp(8);
         page.addView(activeParams, activeParamsParams);
@@ -1087,8 +1089,15 @@ public final class MainActivity extends Activity {
         return wrapScroll(page);
     }
 
-    private String[][] activeParamRows(boolean proxyMode) {
-        if (proxyMode) {
+    private String[][] activeParamRows() {
+        if (MODE_EXIT.equals(connectionMode)) {
+            return new String[][]{
+                    {"Режим", "Выходная нода (L4)"},
+                    {"Выход в интернет", "С IP этого телефона"},
+                    {"IP в локальной сети", getLocalIpAddress() != null ? getLocalIpAddress() : "не определён"},
+            };
+        }
+        if (MODE_PROXY.equals(connectionMode)) {
             return new String[][]{
                     {"Режим", "Прокси (SOCKS5)"},
                     {"DNS-сервер", dnsServer.isEmpty() ? "Авто" : dnsServer},
@@ -1278,7 +1287,7 @@ public final class MainActivity extends Activity {
         list.setOrientation(LinearLayout.VERTICAL);
         list.setBackground(rounded(surface, border, 1, 12));
         list.addView(settingsListRow(R.drawable.ic_swap, "Режим работы",
-                MODE_PROXY.equals(connectionMode) ? "Прокси (SOCKS5)" : "Туннель (весь трафик)", SETTINGS_MODE));
+                modeLabel(connectionMode), SETTINGS_MODE));
         addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_public, "Сеть",
                 "DNS-сервер и MTU", SETTINGS_NETWORK));
@@ -1363,10 +1372,27 @@ public final class MainActivity extends Activity {
 
         RadioButton tunnelOption = modeRadio("Туннель - весь трафик устройства");
         RadioButton proxyOption = modeRadio("Прокси (SOCKS5) - без системного туннеля");
+        RadioButton exitOption = modeRadio("Выходная нода (L4) - телефон выпускает клиентов в интернет");
         modeGroup.addView(tunnelOption);
         modeGroup.addView(proxyOption);
+        modeGroup.addView(exitOption);
         if (MODE_PROXY.equals(editorConnectionMode)) proxyOption.setChecked(true);
+        else if (MODE_EXIT.equals(editorConnectionMode)) exitOption.setChecked(true);
         else tunnelOption.setChecked(true);
+
+        TextView exitHint = text(
+                "Телефон станет выходной нодой: клиенты подключаются к нему через транспорт "
+                        + "выбранного профиля, их трафик выходит в интернет с IP телефона. Профиль "
+                        + "должен совпадать с профилем клиента (тот же документ, ключ и режим). Для "
+                        + "Direct укажите адрес прослушивания, например 0.0.0.0:8445. Экран можно "
+                        + "выключать, нода продолжит работу.",
+                12, secondary, false);
+        setInitialVisibility(exitHint, MODE_EXIT.equals(editorConnectionMode));
+        LinearLayout.LayoutParams exitHintParams = matchWrap();
+        exitHintParams.topMargin = dp(10);
+        exitHintParams.leftMargin = dp(4);
+        exitHintParams.rightMargin = dp(4);
+        section.addView(exitHint, exitHintParams);
 
         boolean proxySelected = MODE_PROXY.equals(editorConnectionMode);
 
@@ -1471,15 +1497,17 @@ public final class MainActivity extends Activity {
             bounce(v);
             startActivity(new Intent(Settings.ACTION_VPN_SETTINGS));
         });
-        setInitialVisibility(alwaysOnRow, !proxySelected);
+        setInitialVisibility(alwaysOnRow, MODE_TUNNEL.equals(editorConnectionMode));
         LinearLayout.LayoutParams alwaysOnParams = matchWrap();
         alwaysOnParams.topMargin = dp(8);
         section.addView(alwaysOnRow, alwaysOnParams);
 
         modeGroup.setOnCheckedChangeListener((group, checkedId) -> {
             tap(group);
-            editorConnectionMode = checkedId == proxyOption.getId() ? MODE_PROXY : MODE_TUNNEL;
+            editorConnectionMode = checkedId == proxyOption.getId() ? MODE_PROXY
+                    : checkedId == exitOption.getId() ? MODE_EXIT : MODE_TUNNEL;
             boolean nowProxy = MODE_PROXY.equals(editorConnectionMode);
+            setViewVisibleAnimated(exitHint, MODE_EXIT.equals(editorConnectionMode));
             setViewVisibleAnimated(portRow, nowProxy);
             setViewVisibleAnimated(lanRow, nowProxy);
             setViewVisibleAnimated(lanAddressHint, nowProxy && editorProxyLanAccess);
@@ -1487,7 +1515,7 @@ public final class MainActivity extends Activity {
             setViewVisibleAnimated(lanWarningHint, nowProxy && editorProxyLanAccess);
             setViewVisibleAnimated(credentialsBlock, nowProxy && editorProxyLanAccess && editorProxyAuthEnabled);
             setViewVisibleAnimated(shareCard, nowProxy);
-            setViewVisibleAnimated(alwaysOnRow, !nowProxy);
+            setViewVisibleAnimated(alwaysOnRow, MODE_TUNNEL.equals(editorConnectionMode));
         });
 
         lanSwitch.setOnCheckedChangeListener((button, checked) -> {
@@ -1519,7 +1547,7 @@ public final class MainActivity extends Activity {
         // holding the VPN slot or the proxy port. Stop it explicitly instead
         // of orphaning it.
         boolean modeChanging = !editorConnectionMode.equals(connectionMode);
-        boolean oldProxyMode = isProxyMode();
+        String oldMode = connectionMode;
         boolean oldWasRunning = isConnectionRunning();
 
         connectionMode = editorConnectionMode;
@@ -1537,10 +1565,8 @@ public final class MainActivity extends Activity {
         persistSettings();
 
         if (modeChanging && oldWasRunning) {
-            Intent stop = new Intent(this, oldProxyMode ? OpenFluxProxyService.class : OpenFluxTunnelService.class);
-            stop.setAction(oldProxyMode ? OpenFluxProxyService.ACTION_STOP : OpenFluxTunnelService.ACTION_STOP);
-            startService(stop);
-            appendLog("Режим изменён - предыдущее соединение (" + (oldProxyMode ? "прокси" : "туннель") + ") остановлено");
+            stopConnection(oldMode);
+            appendLog("Режим изменён - предыдущее соединение (" + modeLabel(oldMode) + ") остановлено");
         }
     }
 
@@ -2851,25 +2877,52 @@ public final class MainActivity extends Activity {
         return MODE_PROXY.equals(connectionMode);
     }
 
+    private boolean isExitMode() {
+        return MODE_EXIT.equals(connectionMode);
+    }
+
+    private static String modeLabel(String mode) {
+        if (MODE_PROXY.equals(mode)) return "Прокси (SOCKS5)";
+        if (MODE_EXIT.equals(mode)) return "Выходная нода (L4)";
+        return "Туннель (весь трафик)";
+    }
+
     private boolean isConnectionRunning() {
+        if (isExitMode()) return OpenFluxExitService.isRunning();
         return isProxyMode() ? OpenFluxProxyService.isRunning() : OpenFluxTunnelService.isRunning();
     }
 
     private String connectionStatus() {
+        if (isExitMode()) return OpenFluxExitService.getStatus();
         return isProxyMode() ? OpenFluxProxyService.getStatus() : OpenFluxTunnelService.getStatus();
     }
 
     private String connectionLastError() {
+        if (isExitMode()) return OpenFluxExitService.getLastError();
         return isProxyMode() ? OpenFluxProxyService.getLastError() : OpenFluxTunnelService.getLastError();
+    }
+
+    private long connectionStartedAt() {
+        if (isExitMode()) return OpenFluxExitService.getConnectedAtMillis();
+        return isProxyMode() ? OpenFluxProxyService.getConnectedAtMillis() : OpenFluxTunnelService.getConnectedAtMillis();
+    }
+
+    private void stopConnection(String mode) {
+        Intent stop;
+        if (MODE_EXIT.equals(mode)) {
+            stop = new Intent(this, OpenFluxExitService.class).setAction(OpenFluxExitService.ACTION_STOP);
+        } else if (MODE_PROXY.equals(mode)) {
+            stop = new Intent(this, OpenFluxProxyService.class).setAction(OpenFluxProxyService.ACTION_STOP);
+        } else {
+            stop = new Intent(this, OpenFluxTunnelService.class).setAction(OpenFluxTunnelService.ACTION_STOP);
+        }
+        startService(stop);
     }
 
     private void toggleConnection() {
         if (isConnectionRunning()) {
-            boolean proxyMode = isProxyMode();
-            Intent stop = new Intent(this, proxyMode ? OpenFluxProxyService.class : OpenFluxTunnelService.class);
-            stop.setAction(proxyMode ? OpenFluxProxyService.ACTION_STOP : OpenFluxTunnelService.ACTION_STOP);
-            startService(stop);
-            appendLog(proxyMode ? "Запрошена остановка прокси" : "Запрошена остановка туннеля");
+            stopConnection(connectionMode);
+            appendLog("Запрошена остановка: " + modeLabel(connectionMode));
             return;
         }
         boolean isMax = "oneme".equals(transportType);
@@ -2895,6 +2948,13 @@ public final class MainActivity extends Activity {
             return;
         }
         persistSettings();
+        if (isExitMode()) {
+            Intent intent = new Intent(this, OpenFluxExitService.class).setAction(OpenFluxExitService.ACTION_START);
+            putProfileExtras(intent);
+            startForegroundService(intent);
+            appendLog("Запуск выходной ноды…");
+            return;
+        }
         if (isProxyMode()) {
             startProxy();
             return;
@@ -2950,13 +3010,12 @@ public final class MainActivity extends Activity {
 
     private void updateStatus() {
         if (tunnelButtonText == null || tunnelButton == null) return;
-        boolean proxyMode = isProxyMode();
         String state = connectionStatus();
         // Text sits on the button's own fill color, not the page background,
         // so it stays a fixed white for contrast rather than status-colored.
         tunnelButtonText.setText(state);
 
-        long connectedAt = proxyMode ? OpenFluxProxyService.getConnectedAtMillis() : OpenFluxTunnelService.getConnectedAtMillis();
+        long connectedAt = connectionStartedAt();
         if (connectedAt == 0L) {
             // GONE, not just empty text: an empty-but-present line still
             // reserves its height, which pushes the icon+status above dead
@@ -2970,7 +3029,7 @@ public final class MainActivity extends Activity {
         if (state != null && !state.equals(lastAnnouncedState)) {
             if ("Подключено".equals(state)) {
                 vibrateSuccess();
-                appendLog("[SUCCESS] Подключено (" + (proxyMode ? "прокси" : "туннель") + ")");
+                appendLog("[SUCCESS] Подключено (" + modeLabel(connectionMode) + ")");
             } else if ("Ошибка".equals(state)) {
                 vibrateError();
             }
@@ -2994,7 +3053,8 @@ public final class MainActivity extends Activity {
             tunnelPressed = Color.rgb(185, 28, 28);
             pulsing = false;
             idle = false;
-        } else if (state != null && (state.contains("Подключ") || state.contains("Останав"))) {
+        } else if (state != null && (state.contains("Подключ") || state.contains("Останав")
+                || state.contains("Ожидание") || state.contains("Нужна"))) {
             tunnelFill = Color.rgb(251, 191, 36);
             tunnelPressed = Color.rgb(217, 119, 6);
             pulsing = true;
