@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"openflux/transport"
+	"openflux/transport/manager"
 )
 
 // Android side of the core's out-of-band captcha/login flow. Desktop and iOS
@@ -13,12 +14,14 @@ import (
 // polls PendingCaptchaURL, lets the user pass the check in a WebView, and
 // hands the resulting cookies to SubmitCaptchaCookies.
 var captcha struct {
-	mu        sync.Mutex
-	store     *transport.CookieStore
-	key       string
-	url       string
-	reason    string
-	exchanger transport.CookieExchanger
+	mu     sync.Mutex
+	store  *transport.CookieStore
+	key    string
+	url    string
+	reason string
+	// apply hands cookies to the live transport that asked for them; nil
+	// once that transport stopped or failed to start.
+	apply func(map[string]string) error
 }
 
 // SetCookieStorePath enables persisting solved-captcha cookies across app
@@ -42,7 +45,11 @@ func attachCaptcha(transportType, documentURL string, raw transport.Transport) {
 	captcha.key = transportType + " " + documentURL
 	captcha.url = ""
 	captcha.reason = ""
-	captcha.exchanger, _ = raw.(transport.CookieExchanger)
+	captcha.apply = nil
+	exchanger, _ := raw.(transport.CookieExchanger)
+	if exchanger != nil {
+		captcha.apply = exchanger.ApplyCookies
+	}
 	if notifier, ok := raw.(transport.ErrorNotifier); ok {
 		notifier.SetErrorNotifier(func(err error, name, url, reason string) {
 			appendLog(fmt.Sprintf("[ANDROID] %s: нужна проверка в браузере (%s)", name, reason))
@@ -52,11 +59,35 @@ func attachCaptcha(transportType, documentURL string, raw transport.Transport) {
 			captcha.mu.Unlock()
 		})
 	}
-	if captcha.store != nil && captcha.exchanger != nil {
+	if captcha.store != nil && exchanger != nil {
 		if saved := captcha.store.Load(captcha.key); len(saved) > 0 {
-			_ = captcha.exchanger.ApplyCookies(saved)
+			_ = exchanger.ApplyCookies(saved)
 		}
 	}
+}
+
+// attachSessionCaptcha does the same for a Session: the Manager reports
+// which transport needs the check, and keys maps each cookie-carrying
+// transport to its store key. Saved cookies are replayed by the Manager.
+func attachSessionCaptcha(m *manager.Manager, keys map[string]string) {
+	captcha.mu.Lock()
+	captcha.key, captcha.url, captcha.reason, captcha.apply = "", "", "", nil
+	store := captcha.store
+	captcha.mu.Unlock()
+	if store != nil {
+		for name, key := range keys {
+			if err := m.UseCookieStore(store, name, key); err != nil {
+				appendLog(fmt.Sprintf("[ANDROID] %s: сохранённые cookies не применились: %v", name, err))
+			}
+		}
+	}
+	m.SetCaptchaNotifier(func(name, url, reason string) {
+		appendLog(fmt.Sprintf("[ANDROID] %s: нужна проверка в браузере (%s)", name, reason))
+		captcha.mu.Lock()
+		captcha.url, captcha.reason, captcha.key = url, reason, keys[name]
+		captcha.apply = func(jar map[string]string) error { return m.ApplyCookiesFor(name, jar) }
+		captcha.mu.Unlock()
+	})
 }
 
 // detachCaptcha drops the live transport reference, so cookies submitted
@@ -64,7 +95,7 @@ func attachCaptcha(transportType, documentURL string, raw transport.Transport) {
 // transport that failed to start or was stopped.
 func detachCaptcha() {
 	captcha.mu.Lock()
-	captcha.exchanger = nil
+	captcha.apply = nil
 	captcha.mu.Unlock()
 }
 
@@ -100,7 +131,7 @@ func SubmitCaptchaCookies(cookieHeader string) string {
 		return "Cookies не получены"
 	}
 	captcha.mu.Lock()
-	store, key, exchanger := captcha.store, captcha.key, captcha.exchanger
+	store, key, apply := captcha.store, captcha.key, captcha.apply
 	captcha.url = ""
 	captcha.reason = ""
 	captcha.mu.Unlock()
@@ -110,10 +141,10 @@ func SubmitCaptchaCookies(cookieHeader string) string {
 			appendLog(fmt.Sprintf("[ERROR] Не удалось сохранить cookies: %v", err))
 		}
 	}
-	if exchanger != nil {
+	if apply != nil {
 		// ApplyCookies may sleep through a reconnect backoff.
 		go func() {
-			if err := exchanger.ApplyCookies(jar); err != nil {
+			if err := apply(jar); err != nil {
 				appendLog(fmt.Sprintf("[ERROR] Применение cookies: %v", err))
 			}
 		}()

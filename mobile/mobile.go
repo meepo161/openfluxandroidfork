@@ -36,23 +36,32 @@ func appendLog(message string) {
 	}
 }
 
-// Start connects the packet transport. transportType is "yandex" (default
-// when empty), "vyandex", "boards", "mailru", "cupsonline" or "oneme". documentURL is
-// required for all but "oneme", which instead needs maxToken (and optionally
-// maxUid). codec is "batched" (default, zstd+coalescing, matches the CLI's
-// --codec=batched) or "legacy" (per-packet LZ4; both peers must agree). It
-// returns an empty string on success and a user-readable error on failure.
+// Start connects the packet transport in classic single-transport mode.
+// transportType is "yandex" (default when empty), "vyandex", "boards",
+// "mailru", "cupsonline" or "oneme". documentURL is required for all but
+// "oneme", which instead needs maxToken (and optionally maxUid). codec is
+// "batched" (default, zstd+coalescing, matches the CLI's --codec=batched) or
+// "legacy" (per-packet LZ4; both peers must agree). It returns an empty
+// string on success and a user-readable error on failure.
 func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid string) string {
-	if transportType == "" {
-		transportType = "yandex"
+	if msg := validateClassic(transportType, documentURL, encryptionSecret); msg != "" {
+		return msg
 	}
-	if transportType != "oneme" && documentURL == "" {
-		return "Ссылка на документ не указана"
-	}
-	if encryptionSecret != "" && len(encryptionSecret) < 16 {
-		return "Ключ шифрования должен содержать не менее 16 символов"
-	}
+	return startPacket(func() (transport.Transport, error) {
+		return classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid)
+	})
+}
 
+// StartSession connects the packet transport in Session mode (the CLI's
+// --negotiate / --transports): several transports at once with failover,
+// see buildSession for specsJSON.
+func StartSession(specsJSON, encryptionSecret string) string {
+	return startPacket(func() (transport.Transport, error) {
+		return buildSession(specsJSON, encryptionSecret)
+	})
+}
+
+func startPacket(build func() (transport.Transport, error)) string {
 	client.mu.Lock()
 	if client.running {
 		client.mu.Unlock()
@@ -65,24 +74,65 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 
 	utils.EnableDebug()
 	utils.SetLogSink(appendLog)
-	appendLog(fmt.Sprintf("[ANDROID] Запуск транспорта %s", transportType))
 
+	fail := func(err error) string {
+		appendLog(fmt.Sprintf("[ERROR] Ошибка запуска: %v", err))
+		client.mu.Lock()
+		client.running = false
+		client.mu.Unlock()
+		detachCaptcha()
+		return err.Error()
+	}
+	trans, err := build()
+	if err != nil {
+		return fail(err)
+	}
+	maxQueue := transport.DefaultConfig().MaxQueueSize
+	trans.Receive(func(data []byte) {
+		packet := append([]byte(nil), data...)
+		client.mu.Lock()
+		if !client.running {
+			client.mu.Unlock()
+			return
+		}
+		if len(client.packets) >= maxQueue {
+			client.packets = client.packets[1:]
+		}
+		client.packets = append(client.packets, packet)
+		client.mu.Unlock()
+	})
+	if err := trans.Start(); err != nil {
+		return fail(err)
+	}
+
+	client.mu.Lock()
+	client.transport = trans
+	client.mu.Unlock()
+	return ""
+}
+
+func validateClassic(transportType, documentURL, encryptionSecret string) string {
+	if transportType != "oneme" && documentURL == "" {
+		return "Ссылка на документ не указана"
+	}
+	if encryptionSecret != "" && len(encryptionSecret) < 16 {
+		return "Ключ шифрования должен содержать не менее 16 символов"
+	}
+	return ""
+}
+
+// classicTransport builds the single-transport stack: carrier, codec and
+// optional encryption, the same layering as the CLI without --negotiate.
+func classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid string) (transport.Transport, error) {
+	if transportType == "" {
+		transportType = "yandex"
+	}
+	appendLog(fmt.Sprintf("[ANDROID] Запуск транспорта %s", transportType))
 	config := transport.DefaultConfig()
-	var inner transport.Transport
-	switch transportType {
-	case "vyandex":
-		inner = yandex.NewYandexVolgaTransport(documentURL, config)
-	case "boards":
-		inner = yandex.NewBoardsTransport(documentURL, config)
-	case "mailru":
-		inner = mailru.NewMailruDocsTransport(documentURL, config)
-	case "cupsonline":
-		inner = cupsonline.NewCupsonlineTransport(documentURL, config, true)
-	case "oneme":
-		uidint, _ := strconv.ParseInt(maxUid, 10, 64)
-		inner = oneme.NewOneMeTransport(false, maxToken, uidint, config)
-	default:
-		inner = yandex.NewYandexDocsTransport(documentURL, config)
+	inner, err := newRawTransport(transportType, documentURL,
+		map[string]interface{}{"token": maxToken, "uid": maxUid}, config)
+	if err != nil {
+		return nil, err
 	}
 	attachCaptcha(transportType, documentURL, inner)
 
@@ -95,55 +145,57 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 		inner = transport.NewBatchedTransport(inner)
 	}
 
-	if encryptionSecret != "" {
-		// Same fallback as the CLI: the KDF context is the document URL, or
-		// the transport name when there isn't one (oneme). Both peers must
-		// derive the same context or the encrypted channel just won't work.
-		context := transportType
-		if documentURL != "" {
-			context = documentURL
-		}
-		encrypted, err := transport.NewEncryptedTransport(inner, encryptionSecret, context, false)
-		if err != nil {
-			client.mu.Lock()
-			client.running = false
-			client.mu.Unlock()
-			detachCaptcha()
-			return err.Error()
-		}
-		inner = encrypted
-		appendLog("[ANDROID] Шифрование транспорта: AES-256-GCM включено")
-	} else {
+	if encryptionSecret == "" {
 		appendLog("[ANDROID] Шифрование транспорта отключено (ключ не задан)")
+		return inner, nil
 	}
-	trans := inner
-	trans.Receive(func(data []byte) {
-		packet := append([]byte(nil), data...)
-		client.mu.Lock()
-		if !client.running {
-			client.mu.Unlock()
-			return
-		}
-		if len(client.packets) >= config.MaxQueueSize {
-			client.packets = client.packets[1:]
-		}
-		client.packets = append(client.packets, packet)
-		client.mu.Unlock()
-	})
-
-	if err := trans.Start(); err != nil {
-		appendLog(fmt.Sprintf("[ERROR] Ошибка запуска: %v", err))
-		client.mu.Lock()
-		client.running = false
-		client.mu.Unlock()
-		detachCaptcha()
-		return err.Error()
+	// Same fallback as the CLI: the KDF context is the document URL, or
+	// the transport name when there isn't one (oneme). Both peers must
+	// derive the same context or the encrypted channel just won't work.
+	context := transportType
+	if documentURL != "" {
+		context = documentURL
 	}
+	encrypted, err := transport.NewEncryptedTransport(inner, encryptionSecret, context, false)
+	if err != nil {
+		return nil, err
+	}
+	appendLog("[ANDROID] Шифрование транспорта: AES-256-GCM включено")
+	return encrypted, nil
+}
 
-	client.mu.Lock()
-	client.transport = trans
-	client.mu.Unlock()
-	return ""
+// newRawTransport builds one carrier, like the CLI's transportFactory for
+// the client side. params: "token"/"uid" for oneme, "dial" (host:port) for
+// direct.
+func newRawTransport(typ, url string, params map[string]interface{}, config transport.TransportConfig) (transport.Transport, error) {
+	str := func(key string) string {
+		v, _ := params[key].(string)
+		return v
+	}
+	switch typ {
+	case "", "yandex":
+		return yandex.NewYandexDocsTransport(url, config), nil
+	case "vyandex":
+		return yandex.NewYandexVolgaTransport(url, config), nil
+	case "boards":
+		return yandex.NewBoardsTransport(url, config), nil
+	case "mailru":
+		return mailru.NewMailruDocsTransport(url, config), nil
+	case "cupsonline":
+		return cupsonline.NewCupsonlineTransport(url, config, true), nil
+	case "oneme":
+		uid, _ := strconv.ParseInt(str("uid"), 10, 64)
+		return oneme.NewOneMeTransport(false, str("token"), uid, config), nil
+	case "direct":
+		if str("dial") == "" {
+			return nil, fmt.Errorf("direct: не указан адрес ноды (host:port)")
+		}
+		dcfg := transport.DefaultDirectConfig()
+		dcfg.DialAddr = str("dial")
+		return transport.NewDirectTransport(config, dcfg), nil
+	default:
+		return nil, fmt.Errorf("неизвестный тип транспорта %q", typ)
+	}
 }
 
 func Stop() {
