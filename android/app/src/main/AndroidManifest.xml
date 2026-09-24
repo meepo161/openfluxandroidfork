@@ -33,6 +33,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".CaptchaActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask" />
+
         <service
             android:name=".OpenFluxTunnelService"
             android:exported="false"

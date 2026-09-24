@@ -84,6 +84,7 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 	default:
 		inner = yandex.NewYandexDocsTransport(documentURL, config)
 	}
+	attachCaptcha(transportType, documentURL, inner)
 
 	// App-layer codec, same as the CLI's --codec flag. Both peers must use
 	// the same one. Applied before encryption so it compresses plaintext
@@ -107,6 +108,7 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 			client.mu.Lock()
 			client.running = false
 			client.mu.Unlock()
+			detachCaptcha()
 			return err.Error()
 		}
 		inner = encrypted
@@ -134,6 +136,7 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 		client.mu.Lock()
 		client.running = false
 		client.mu.Unlock()
+		detachCaptcha()
 		return err.Error()
 	}
 
@@ -150,6 +153,8 @@ func Stop() {
 	client.transport = nil
 	client.packets = nil
 	client.mu.Unlock()
+	detachCaptcha()
+	CancelCaptcha()
 	appendLog("[ANDROID] Остановка транспорта")
 	if trans != nil {
 		_ = trans.Stop()

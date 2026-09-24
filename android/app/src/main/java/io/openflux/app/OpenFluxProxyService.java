@@ -14,6 +14,7 @@ import android.os.SystemClock;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.openflux.bridge.mobile.Mobile;
@@ -50,6 +51,7 @@ public final class OpenFluxProxyService extends Service {
 
     private final ExecutorService workers = Executors.newSingleThreadExecutor();
     private final AtomicInteger generation = new AtomicInteger();
+    private final AtomicBoolean awaitingCaptcha = new AtomicBoolean();
 
     private final Handler notificationHandler = new Handler(Looper.getMainLooper());
     private long lastSampledSent;
@@ -76,6 +78,14 @@ public final class OpenFluxProxyService extends Service {
     // reflect a later drop in the underlying transport without this.
     private final Runnable healthChecker = new Runnable() {
         @Override public void run() {
+            if (running && !Mobile.pendingCaptchaURL().isEmpty() && awaitingCaptcha.compareAndSet(false, true)) {
+                // Captcha hit on a mid-session reconnect, not during the initial connect.
+                int session = generation.get();
+                new Thread(() -> {
+                    try { awaitCaptcha(session); }
+                    finally { awaitingCaptcha.set(false); }
+                }).start();
+            }
             if (running) {
                 boolean connected = Mobile.proxyIsConnected();
                 if (!connected && "Подключено".equals(status)) {
@@ -184,13 +194,27 @@ public final class OpenFluxProxyService extends Service {
     private void startProxyTransport(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String bindHost, int port,
             String username, String password, int session) {
         if (!isCurrent(session)) return;
-        String error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, bindHost + ":" + port, username, password);
+        CaptchaActivity.initCookieStore(this);
+        String listen = bindHost + ":" + port;
+        String error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
+        // Some transports (Volga) fail Start outright on a captcha; retry
+        // with the solved cookies, which the next Start replays.
+        while (error != null && !error.isEmpty() && awaitCaptcha(session)) {
+            error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
+        }
         if (error != null && !error.isEmpty()) {
             fail(session, error);
             return;
         }
 
         for (int attempt = 0; isCurrent(session) && !Mobile.proxyIsConnected() && attempt < 120; attempt++) {
+            if (!Mobile.pendingCaptchaURL().isEmpty()) {
+                if (!awaitCaptcha(session)) {
+                    if (isCurrent(session)) fail(session, "Проверка Яндекса не пройдена");
+                    return;
+                }
+                attempt = 0;
+            }
             try { Thread.sleep(250); }
             catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -206,6 +230,18 @@ public final class OpenFluxProxyService extends Service {
         status = "Подключено";
         if (connectedAtMillis == 0L) connectedAtMillis = System.currentTimeMillis();
         startSpeedUpdates();
+    }
+
+    private boolean awaitCaptcha(int session) {
+        if (Mobile.pendingCaptchaURL().isEmpty()) return false;
+        status = "Нужна проверка";
+        lastError = "Яндекс запросил проверку - откройте уведомление";
+        boolean solved = CaptchaActivity.awaitIfPending(this, () -> isCurrent(session));
+        if (solved) {
+            status = "Подключение…";
+            lastError = "";
+        }
+        return solved;
     }
 
     private boolean isCurrent(int session) {

@@ -30,6 +30,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -60,6 +61,7 @@ public final class OpenFluxTunnelService extends VpnService {
     private final ExecutorService workers = Executors.newCachedThreadPool();
     private final Object outputLock = new Object();
     private final AtomicInteger generation = new AtomicInteger();
+    private final AtomicBoolean awaitingCaptcha = new AtomicBoolean();
     private volatile boolean active;
     private ParcelFileDescriptor tunnel;
     private FileInputStream tunnelInput;
@@ -97,6 +99,14 @@ public final class OpenFluxTunnelService extends VpnService {
     // state honestly instead of just failing silently.
     private final Runnable healthChecker = new Runnable() {
         @Override public void run() {
+            if (running && !Mobile.pendingCaptchaURL().isEmpty() && awaitingCaptcha.compareAndSet(false, true)) {
+                // Captcha hit on a mid-session reconnect, not during the initial connect.
+                int session = generation.get();
+                new Thread(() -> {
+                    try { awaitCaptcha(session); }
+                    finally { awaitingCaptcha.set(false); }
+                }).start();
+            }
             if (running) {
                 boolean connected = Mobile.isConnected();
                 if (!connected && "Подключено".equals(status)) {
@@ -220,13 +230,26 @@ public final class OpenFluxTunnelService extends VpnService {
 
     private void startTunnel(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String dnsServerParam, int mtu, int session) {
         if (!isCurrent(session)) return;
+        CaptchaActivity.initCookieStore(this);
         String error = Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+        // Some transports (Volga) fail Start outright on a captcha; retry
+        // with the solved cookies, which the next Start replays.
+        while (error != null && !error.isEmpty() && awaitCaptcha(session)) {
+            error = Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+        }
         if (error != null && !error.isEmpty()) {
             fail(session, error);
             return;
         }
 
         for (int attempt = 0; isCurrent(session) && !Mobile.isConnected() && attempt < 120; attempt++) {
+            if (!Mobile.pendingCaptchaURL().isEmpty()) {
+                if (!awaitCaptcha(session)) {
+                    if (isCurrent(session)) fail(session, "Проверка Яндекса не пройдена");
+                    return;
+                }
+                attempt = 0;
+            }
             try { Thread.sleep(250); }
             catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -420,6 +443,18 @@ public final class OpenFluxTunnelService extends VpnService {
 
     private boolean isCurrent(int session) {
         return active && generation.get() == session;
+    }
+
+    private boolean awaitCaptcha(int session) {
+        if (Mobile.pendingCaptchaURL().isEmpty()) return false;
+        status = "Нужна проверка";
+        lastError = "Яндекс запросил проверку - откройте уведомление";
+        boolean solved = CaptchaActivity.awaitIfPending(this, () -> isCurrent(session));
+        if (solved) {
+            status = "Подключение…";
+            lastError = "";
+        }
+        return solved;
     }
 
     private static boolean isIpv4Tcp(byte[] packet) {

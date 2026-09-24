@@ -78,6 +78,7 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 	default:
 		inner = yandex.NewYandexDocsTransport(documentURL, config)
 	}
+	attachCaptcha(transportType, documentURL, inner)
 
 	// App-layer codec, same as the CLI's --codec flag. Both peers must use
 	// the same one. Applied before encryption so it compresses plaintext
@@ -98,6 +99,7 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 		}
 		encrypted, err := transport.NewEncryptedTransport(inner, encryptionSecret, context, false)
 		if err != nil {
+			detachCaptcha()
 			return err.Error()
 		}
 		inner = encrypted
@@ -108,6 +110,7 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 	trans := inner
 	if err := trans.Start(); err != nil {
 		appendLog(fmt.Sprintf("[ERROR] Ошибка запуска прокси: %v", err))
+		detachCaptcha()
 		return err.Error()
 	}
 
@@ -119,6 +122,7 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 	if err := server.Bind(); err != nil {
 		_ = trans.Stop()
 		appendLog(fmt.Sprintf("[ERROR] Не удалось занять %s: %v", listenAddr, err))
+		detachCaptcha()
 		return fmt.Sprintf("Порт %s уже занят", listenAddr)
 	}
 
@@ -152,6 +156,8 @@ func StopProxy() {
 	proxy.tun = nil
 	proxy.server = nil
 	proxy.mu.Unlock()
+	detachCaptcha()
+	CancelCaptcha()
 	appendLog("[ANDROID] Остановка прокси-транспорта")
 	if server != nil {
 		_ = server.Close()
