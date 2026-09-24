@@ -77,7 +77,9 @@ public final class OpenFluxTileService extends TileService {
         for (Profile p : profiles) {
             if (p.id == selectedId) { selected = p; break; }
         }
-        if (selected == null || selected.documentUrl == null || selected.documentUrl.isEmpty()) return false;
+        if (selected == null) return false;
+        if (!"oneme".equals(selected.transportType)
+                && (selected.documentUrl == null || selected.documentUrl.isEmpty())) return false;
 
         SharedPreferences prefs = getSharedPreferences(MainActivity.SETTINGS_PREFS_NAME, MODE_PRIVATE);
         if (proxyMode) {
@@ -85,9 +87,7 @@ public final class OpenFluxTileService extends TileService {
             boolean authEnabled = prefs.getBoolean("proxy_auth_enabled", false);
             Intent intent = new Intent(this, OpenFluxProxyService.class);
             intent.setAction(OpenFluxProxyService.ACTION_START);
-            intent.putExtra(OpenFluxProxyService.EXTRA_DOCUMENT_URL, selected.documentUrl);
-            intent.putExtra(OpenFluxProxyService.EXTRA_ENCRYPTION_SECRET, selected.encryptionSecret);
-            intent.putExtra(OpenFluxProxyService.EXTRA_TRANSPORT_TYPE, selected.transportType);
+            selected.putConnectionExtras(intent);
             intent.putExtra(OpenFluxProxyService.EXTRA_PORT, prefs.getInt("proxy_port", 1080));
             intent.putExtra(OpenFluxProxyService.EXTRA_LAN_ACCESS, lanAccess);
             if (lanAccess && authEnabled) {
@@ -98,9 +98,7 @@ public final class OpenFluxTileService extends TileService {
         } else {
             Intent intent = new Intent(this, OpenFluxTunnelService.class);
             intent.setAction(OpenFluxTunnelService.ACTION_START);
-            intent.putExtra(OpenFluxTunnelService.EXTRA_DOCUMENT_URL, selected.documentUrl);
-            intent.putExtra(OpenFluxTunnelService.EXTRA_ENCRYPTION_SECRET, selected.encryptionSecret);
-            intent.putExtra(OpenFluxTunnelService.EXTRA_TRANSPORT_TYPE, selected.transportType);
+            selected.putConnectionExtras(intent);
             intent.putExtra(OpenFluxTunnelService.EXTRA_DNS_SERVER, prefs.getString("dns_server", "1.1.1.1"));
             intent.putExtra(OpenFluxTunnelService.EXTRA_MTU, prefs.getInt("mtu", 1400));
             startForegroundService(intent);

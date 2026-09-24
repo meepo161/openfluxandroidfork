@@ -8,6 +8,7 @@ import android.animation.ObjectAnimator;
 import android.animation.PropertyValuesHolder;
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -33,7 +34,9 @@ import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.method.PasswordTransformationMethod;
@@ -81,6 +84,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.WeakHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -185,6 +189,13 @@ public final class MainActivity extends Activity {
     private String editorCodec = "batched";
     private String editorMaxToken = "";
     private String editorMaxUid = "";
+    private boolean editorSession;
+    private int editorPriority = 50;
+    private final List<Profile.Transport> editorExtras = new ArrayList<>();
+    private View sessionFieldsContainer;
+    private View codecSection;
+    private EditText priorityInput;
+    private LinearLayout extrasList;
     private EditText profileNameInput;
     private PopupWindow profileDropdown;
     private String dnsServer;
@@ -795,12 +806,20 @@ public final class MainActivity extends Activity {
     }
 
     private String transportLabel(String type) {
+        if ("direct".equals(type)) return "Direct (TCP до ноды)";
         if ("vyandex".equals(type)) return "Yandex Docs (Volga)";
         if ("boards".equals(type)) return "Yandex Board";
         if ("mailru".equals(type)) return "Mail.ru Docs";
         if ("cupsonline".equals(type)) return "Cups.online";
         if ("oneme".equals(type)) return "MAX (OneMe)";
         return "Yandex Docs";
+    }
+
+    private String profileTransportSummary(Profile p) {
+        if (!p.session) return transportLabel(p.transportType);
+        StringBuilder summary = new StringBuilder("Session: ").append(transportLabel(p.transportType));
+        for (Profile.Transport t : p.extraTransports) summary.append(" + ").append(transportLabel(t.type));
+        return summary.toString();
     }
 
     private void selectProfile(long id) {
@@ -817,6 +836,10 @@ public final class MainActivity extends Activity {
         editorCodec = existing != null ? existing.codec : "batched";
         editorMaxToken = existing != null ? existing.maxToken : "";
         editorMaxUid = existing != null ? existing.maxUid : "";
+        editorSession = existing != null && existing.session;
+        editorPriority = existing != null ? existing.priority : 50;
+        editorExtras.clear();
+        if (existing != null) for (Profile.Transport t : existing.extraTransports) editorExtras.add(t.copy());
         profileEditorOpen = true;
         showPage(PAGE_PROFILES);
     }
@@ -845,6 +868,21 @@ public final class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             return;
         }
+        int mainPriority = parsePriority(priorityInput != null ? priorityInput.getText().toString() : "", 50);
+        if (editorSession) {
+            if (secret.length() < 16) {
+                Toast.makeText(this, "Для режима Session нужен ключ шифрования не короче 16 символов",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            for (Profile.Transport t : editorExtras) {
+                String problem = extraTransportProblem(t);
+                if (problem != null) {
+                    Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+        }
         Profile target = null;
         if (editingProfileId != null) {
             for (Profile p : profiles) if (p.id == editingProfileId) { target = p; break; }
@@ -863,6 +901,10 @@ public final class MainActivity extends Activity {
         target.codec = editorCodec;
         target.maxToken = token;
         target.maxUid = uid;
+        target.session = editorSession;
+        target.priority = mainPriority;
+        target.extraTransports.clear();
+        for (Profile.Transport t : editorExtras) target.extraTransports.add(t.copy());
         profileStore.save(profiles);
         if (isNew && selectedProfile() == null) selectProfile(target.id);
         if (target.id == selectedProfileId) applySelectedProfileToFields();
@@ -950,7 +992,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
         copyParams.leftMargin = dp(14);
         copy.addView(text(p != null ? p.name : "Профиль не выбран", 15, text, true));
-        copy.addView(text(p != null ? transportLabel(p.transportType) : "Нажмите, чтобы создать профиль",
+        copy.addView(text(p != null ? profileTransportSummary(p) : "Нажмите, чтобы создать профиль",
                 12, secondary, false));
         row.addView(copy, copyParams);
         row.addView(icon(R.drawable.ic_chevron_right, hint), new LinearLayout.LayoutParams(dp(20), dp(20)));
@@ -1799,7 +1841,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
         copyParams.leftMargin = dp(16);
         copy.addView(text(p.name, 15, text, selected));
-        copy.addView(text(transportLabel(p.transportType) + (selected ? " · активен" : ""), 12, secondary, false));
+        copy.addView(text(profileTransportSummary(p) + (selected ? " · активен" : ""), 12, secondary, false));
         row.addView(copy, copyParams);
         ImageButton editButton = iconButton(R.drawable.ic_settings, "Изменить профиль «" + p.name + "»");
         editButton.setOnClickListener(v -> {
@@ -1861,6 +1903,13 @@ public final class MainActivity extends Activity {
         section.addView(iconLabel, iconLabelParams);
         section.addView(buildIconPicker(), matchWrap());
 
+        TextView modeLabel = label("РЕЖИМ");
+        LinearLayout.LayoutParams modeLabelParams = matchWrap();
+        modeLabelParams.topMargin = dp(18);
+        modeLabelParams.bottomMargin = dp(8);
+        section.addView(modeLabel, modeLabelParams);
+        section.addView(buildSessionModeSelector(), matchWrap());
+
         TextView transportTypeLabel = label("ТРАНСПОРТ");
         LinearLayout.LayoutParams transportTypeLabelParams = matchWrap();
         transportTypeLabelParams.topMargin = dp(18);
@@ -1874,12 +1923,18 @@ public final class MainActivity extends Activity {
         maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
         section.addView(maxFieldsContainer, maxFieldsParams);
 
+        // Session always uses the batched codec, so the choice only exists in
+        // classic mode.
+        LinearLayout codecBox = new LinearLayout(this);
+        codecBox.setOrientation(LinearLayout.VERTICAL);
         TextView codecLabel = label("КОДЕК");
         LinearLayout.LayoutParams codecLabelParams = matchWrap();
         codecLabelParams.topMargin = dp(18);
         codecLabelParams.bottomMargin = dp(8);
-        section.addView(codecLabel, codecLabelParams);
-        section.addView(buildCodecSelector(), matchWrap());
+        codecBox.addView(codecLabel, codecLabelParams);
+        codecBox.addView(buildCodecSelector(), matchWrap());
+        codecSection = codecBox;
+        section.addView(codecBox, matchWrap());
 
         LinearLayout.LayoutParams urlParams = new LinearLayout.LayoutParams(-1, dp(56));
         urlParams.topMargin = dp(18);
@@ -1912,6 +1967,10 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams generateParams = new LinearLayout.LayoutParams(-1, dp(44));
         generateParams.topMargin = dp(4);
         section.addView(generateKey, generateParams);
+
+        sessionFieldsContainer = buildSessionFields();
+        section.addView(sessionFieldsContainer, matchWrap());
+        applySessionVisibility();
 
         Button save = new Button(this);
         save.setText("Сохранить профиль");
@@ -1956,6 +2015,218 @@ public final class MainActivity extends Activity {
         // the bottom navigation bar when the page is scrolled all the way down.
         section.addView(new View(this), new LinearLayout.LayoutParams(-1, dp(24)));
         return section;
+    }
+
+    private View buildSessionModeSelector() {
+        RadioGroup group = new RadioGroup(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        RadioButton classic = modeRadio("Классический: один транспорт");
+        RadioButton session = modeRadio("Session: несколько транспортов с откатом");
+        group.addView(classic);
+        group.addView(session);
+        (editorSession ? session : classic).setChecked(true);
+        group.setOnCheckedChangeListener((g, checkedId) -> {
+            tap(g);
+            editorSession = checkedId == session.getId();
+            applySessionVisibility();
+        });
+        return group;
+    }
+
+    private void applySessionVisibility() {
+        if (sessionFieldsContainer != null) {
+            sessionFieldsContainer.setVisibility(editorSession ? View.VISIBLE : View.GONE);
+        }
+        if (codecSection != null) codecSection.setVisibility(editorSession ? View.GONE : View.VISIBLE);
+    }
+
+    private View buildSessionFields() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        TextView sessionLabel = label("SESSION");
+        LinearLayout.LayoutParams sessionLabelParams = matchWrap();
+        sessionLabelParams.topMargin = dp(18);
+        sessionLabelParams.bottomMargin = dp(6);
+        box.addView(sessionLabel, sessionLabelParams);
+        TextView hintView = text(
+                "Все транспорты работают одновременно, трафик идёт по самому приоритетному "
+                        + "из работающих, при его отказе - по следующему. Нода должна быть запущена "
+                        + "с --negotiate и теми же транспортами (--transports), в --url - ссылка "
+                        + "самого приоритетного транспорта с документом. Ключ шифрования обязателен.",
+                11, secondary, false);
+        LinearLayout.LayoutParams hintParams = matchWrap();
+        hintParams.leftMargin = dp(4);
+        hintParams.rightMargin = dp(4);
+        box.addView(hintView, hintParams);
+
+        caption(box, "Приоритет основного транспорта (больше - важнее)", dp(12));
+        priorityInput = settingInput("50", Integer.toString(editorPriority), InputType.TYPE_CLASS_NUMBER);
+        boxedInput(box, priorityInput, dp(4));
+
+        TextView extrasLabel = label("ДОПОЛНИТЕЛЬНЫЕ ТРАНСПОРТЫ");
+        LinearLayout.LayoutParams extrasLabelParams = matchWrap();
+        extrasLabelParams.topMargin = dp(18);
+        box.addView(extrasLabel, extrasLabelParams);
+
+        extrasList = new LinearLayout(this);
+        extrasList.setOrientation(LinearLayout.VERTICAL);
+        box.addView(extrasList, matchWrap());
+        refreshExtras();
+
+        Button add = new Button(this);
+        add.setText("Добавить транспорт");
+        add.setAllCaps(false);
+        add.setTextColor(accent);
+        add.setTextSize(13);
+        add.setStateListAnimator(null);
+        add.setBackground(ripple(Color.TRANSPARENT, 9));
+        add.setOnClickListener(v -> {
+            tap(v);
+            editorExtras.add(new Profile.Transport());
+            refreshExtras();
+        });
+        LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(-1, dp(44));
+        addParams.topMargin = dp(4);
+        box.addView(add, addParams);
+        return box;
+    }
+
+    private void refreshExtras() {
+        if (extrasList == null) return;
+        extrasList.removeAllViews();
+        for (Profile.Transport t : editorExtras) {
+            LinearLayout.LayoutParams rowParams = matchWrap();
+            rowParams.topMargin = dp(8);
+            extrasList.addView(buildExtraTransportRow(t), rowParams);
+        }
+    }
+
+    private View buildExtraTransportRow(Profile.Transport t) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(rounded(surface, border, 1, 10));
+        card.setPadding(dp(8), dp(4), dp(8), dp(10));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        Button type = new Button(this);
+        type.setText(transportLabel(t.type) + "  ▾");
+        type.setAllCaps(false);
+        type.setTextColor(accent);
+        type.setTextSize(14);
+        type.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        type.setStateListAnimator(null);
+        type.setBackground(ripple(Color.TRANSPARENT, 9));
+        type.setOnClickListener(v -> {
+            tap(v);
+            chooseExtraTransportType(t);
+        });
+        header.addView(type, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        Button remove = new Button(this);
+        remove.setText("Удалить");
+        remove.setAllCaps(false);
+        remove.setTextColor(darkMode ? Color.rgb(242, 139, 130) : Color.rgb(217, 48, 37));
+        remove.setTextSize(13);
+        remove.setStateListAnimator(null);
+        remove.setBackground(ripple(Color.TRANSPARENT, 9));
+        remove.setOnClickListener(v -> {
+            tap(v);
+            editorExtras.remove(t);
+            refreshExtras();
+        });
+        header.addView(remove, new LinearLayout.LayoutParams(-2, dp(44)));
+        card.addView(header, matchWrap());
+
+        boolean max = "oneme".equals(t.type);
+        boolean direct = "direct".equals(t.type);
+        EditText value = settingInput(
+                direct ? "Адрес ноды: host:port" : max ? "MAX Web token" : "HTTPS-ссылка на документ",
+                t.value,
+                max ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+                        : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        bindText(value, v -> t.value = v);
+        boxedInput(card, value, dp(4));
+        if (max) {
+            EditText uid = settingInput("MAX call user id", t.uid, InputType.TYPE_CLASS_NUMBER);
+            bindText(uid, v -> t.uid = v);
+            boxedInput(card, uid, dp(8));
+        }
+        caption(card, "Приоритет (больше - важнее)", dp(8));
+        EditText priority = settingInput("100", Integer.toString(t.priority), InputType.TYPE_CLASS_NUMBER);
+        bindText(priority, v -> t.priority = parsePriority(v, t.priority));
+        boxedInput(card, priority, dp(4));
+        return card;
+    }
+
+    private void chooseExtraTransportType(Profile.Transport t) {
+        String[] types = {"direct", "yandex", "vyandex", "boards", "mailru", "cupsonline", "oneme"};
+        String[] labels = new String[types.length];
+        for (int i = 0; i < types.length; i++) labels[i] = transportLabel(types[i]);
+        new AlertDialog.Builder(this, darkMode
+                ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+                : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                .setTitle("Тип транспорта")
+                .setItems(labels, (dialog, which) -> {
+                    if (!types[which].equals(t.type)) {
+                        t.type = types[which];
+                        t.value = "";
+                        t.uid = "";
+                    }
+                    refreshExtras();
+                })
+                .show();
+    }
+
+    // Returns why an extra Session transport can't be saved, or null.
+    private String extraTransportProblem(Profile.Transport t) {
+        if ("direct".equals(t.type)) {
+            int colon = t.value.lastIndexOf(':');
+            int port = colon > 0 ? parsePriority(t.value.substring(colon + 1), -1) : -1;
+            if (colon <= 0 || port < 1 || port > 65535) {
+                return "Direct: укажите адрес ноды в виде host:port";
+            }
+            return null;
+        }
+        if ("oneme".equals(t.type)) {
+            return t.value.isEmpty() ? "MAX: укажите Web token дополнительного транспорта" : null;
+        }
+        return isValidDocumentUrl(t.value)
+                ? null
+                : transportLabel(t.type) + ": укажите корректную HTTPS-ссылку на документ";
+    }
+
+    private static int parsePriority(String value, int fallback) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private void caption(LinearLayout parent, String value, int topMargin) {
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = topMargin;
+        params.leftMargin = dp(4);
+        parent.addView(text(value, 12, secondary, false), params);
+    }
+
+    private void boxedInput(LinearLayout parent, EditText input, int topMargin) {
+        FrameLayout field = new FrameLayout(this);
+        field.setBackground(rounded(surface, border, 1, 10));
+        input.setPadding(dp(16), 0, dp(16), 0);
+        field.addView(input, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(56));
+        params.topMargin = topMargin;
+        parent.addView(field, params);
+    }
+
+    private static void bindText(EditText input, Consumer<String> sink) {
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable s) { sink.accept(s.toString().trim()); }
+        });
     }
 
     private View buildIconPicker() {
@@ -2645,15 +2916,24 @@ public final class MainActivity extends Activity {
         else if (requestCode == TUNNEL_PERMISSION_REQUEST) appendLog("[ERROR] Разрешение на создание туннеля не выдано");
     }
 
-    private void startTunnel() {
-        Intent intent = new Intent(this, OpenFluxTunnelService.class);
-        intent.setAction(OpenFluxTunnelService.ACTION_START);
+    private void putProfileExtras(Intent intent) {
+        Profile p = selectedProfile();
+        if (p != null) {
+            p.putConnectionExtras(intent);
+            return;
+        }
         intent.putExtra(OpenFluxTunnelService.EXTRA_DOCUMENT_URL, documentUrl);
         intent.putExtra(OpenFluxTunnelService.EXTRA_ENCRYPTION_SECRET, encryptionSecret);
         intent.putExtra(OpenFluxTunnelService.EXTRA_TRANSPORT_TYPE, transportType);
         intent.putExtra(OpenFluxTunnelService.EXTRA_CODEC, codec);
         intent.putExtra(OpenFluxTunnelService.EXTRA_MAX_TOKEN, maxToken);
         intent.putExtra(OpenFluxTunnelService.EXTRA_MAX_UID, maxUid);
+    }
+
+    private void startTunnel() {
+        Intent intent = new Intent(this, OpenFluxTunnelService.class);
+        intent.setAction(OpenFluxTunnelService.ACTION_START);
+        putProfileExtras(intent);
         intent.putExtra(OpenFluxTunnelService.EXTRA_DNS_SERVER, dnsServer);
         intent.putExtra(OpenFluxTunnelService.EXTRA_MTU, mtu);
         startForegroundService(intent);
@@ -2663,12 +2943,7 @@ public final class MainActivity extends Activity {
     private void startProxy() {
         Intent intent = new Intent(this, OpenFluxProxyService.class);
         intent.setAction(OpenFluxProxyService.ACTION_START);
-        intent.putExtra(OpenFluxProxyService.EXTRA_DOCUMENT_URL, documentUrl);
-        intent.putExtra(OpenFluxProxyService.EXTRA_ENCRYPTION_SECRET, encryptionSecret);
-        intent.putExtra(OpenFluxProxyService.EXTRA_TRANSPORT_TYPE, transportType);
-        intent.putExtra(OpenFluxProxyService.EXTRA_CODEC, codec);
-        intent.putExtra(OpenFluxProxyService.EXTRA_MAX_TOKEN, maxToken);
-        intent.putExtra(OpenFluxProxyService.EXTRA_MAX_UID, maxUid);
+        putProfileExtras(intent);
         intent.putExtra(OpenFluxProxyService.EXTRA_PORT, proxyPort);
         intent.putExtra(OpenFluxProxyService.EXTRA_LAN_ACCESS, proxyLanAccess);
         if (proxyLanAccess && proxyAuthEnabled) {

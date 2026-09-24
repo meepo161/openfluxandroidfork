@@ -47,6 +47,7 @@ public final class OpenFluxTunnelService extends VpnService {
     public static final String EXTRA_CODEC = "codec";
     public static final String EXTRA_MAX_TOKEN = "max_token";
     public static final String EXTRA_MAX_UID = "max_uid";
+    public static final String EXTRA_SESSION_TRANSPORTS = "session_transports";
 
     private static final String CHANNEL_ID = "openflux_tunnel";
     private static final int NOTIFICATION_ID = 7;
@@ -62,6 +63,9 @@ public final class OpenFluxTunnelService extends VpnService {
     private final Object outputLock = new Object();
     private final AtomicInteger generation = new AtomicInteger();
     private final AtomicBoolean awaitingCaptcha = new AtomicBoolean();
+    // Session mode (Mobile.startSession): the profile's transport list as
+    // JSON, or empty for the classic single-transport mode.
+    private volatile String sessionTransports = "";
     private volatile boolean active;
     private ParcelFileDescriptor tunnel;
     private FileInputStream tunnelInput;
@@ -166,7 +170,9 @@ public final class OpenFluxTunnelService extends VpnService {
         String transportTypeExtra = intent == null ? null : intent.getStringExtra(EXTRA_TRANSPORT_TYPE);
         final String transportType = transportTypeExtra == null || transportTypeExtra.isEmpty()
                 ? "yandex" : transportTypeExtra;
-        boolean needsUrl = !"oneme".equals(transportType);
+        String sessionExtra = intent == null ? null : intent.getStringExtra(EXTRA_SESSION_TRANSPORTS);
+        sessionTransports = sessionExtra == null ? "" : sessionExtra;
+        boolean needsUrl = !"oneme".equals(transportType) && sessionTransports.isEmpty();
 
         String url = intent == null ? null : intent.getStringExtra(EXTRA_DOCUMENT_URL);
         if (needsUrl && (url == null || !url.startsWith("https://"))) {
@@ -228,14 +234,21 @@ public final class OpenFluxTunnelService extends VpnService {
         return "1.1.1.1";
     }
 
+    private String startCarrier(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid) {
+        String specs = sessionTransports;
+        return specs.isEmpty()
+                ? Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid)
+                : Mobile.startSession(specs, encryptionSecret);
+    }
+
     private void startTunnel(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String dnsServerParam, int mtu, int session) {
         if (!isCurrent(session)) return;
         CaptchaActivity.initCookieStore(this);
-        String error = Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+        String error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid);
         // Some transports (Volga) fail Start outright on a captcha; retry
         // with the solved cookies, which the next Start replays.
         while (error != null && !error.isEmpty() && awaitCaptcha(session)) {
-            error = Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+            error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid);
         }
         if (error != null && !error.isEmpty()) {
             fail(session, error);
@@ -258,7 +271,7 @@ public final class OpenFluxTunnelService extends VpnService {
         }
         if (!isCurrent(session)) return;
         if (!Mobile.isConnected()) {
-            fail(session, "Yandex-транспорт не подключился за 30 секунд");
+            fail(session, "Транспорт не подключился за 30 секунд");
             return;
         }
 

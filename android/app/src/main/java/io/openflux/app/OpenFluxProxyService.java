@@ -37,6 +37,7 @@ public final class OpenFluxProxyService extends Service {
     public static final String EXTRA_CODEC = "codec";
     public static final String EXTRA_MAX_TOKEN = "max_token";
     public static final String EXTRA_MAX_UID = "max_uid";
+    public static final String EXTRA_SESSION_TRANSPORTS = "session_transports";
 
     private static final String CHANNEL_ID = "openflux_proxy";
     private static final int NOTIFICATION_ID = 8;
@@ -52,6 +53,9 @@ public final class OpenFluxProxyService extends Service {
     private final ExecutorService workers = Executors.newSingleThreadExecutor();
     private final AtomicInteger generation = new AtomicInteger();
     private final AtomicBoolean awaitingCaptcha = new AtomicBoolean();
+    // Session mode (Mobile.startSession): the profile's transport list as
+    // JSON, or empty for the classic single-transport mode.
+    private volatile String sessionTransports = "";
 
     private final Handler notificationHandler = new Handler(Looper.getMainLooper());
     private long lastSampledSent;
@@ -146,7 +150,9 @@ public final class OpenFluxProxyService extends Service {
         String transportTypeExtra = intent == null ? null : intent.getStringExtra(EXTRA_TRANSPORT_TYPE);
         final String transportType = transportTypeExtra == null || transportTypeExtra.isEmpty()
                 ? "yandex" : transportTypeExtra;
-        boolean needsUrl = !"oneme".equals(transportType);
+        String sessionExtra = intent == null ? null : intent.getStringExtra(EXTRA_SESSION_TRANSPORTS);
+        sessionTransports = sessionExtra == null ? "" : sessionExtra;
+        boolean needsUrl = !"oneme".equals(transportType) && sessionTransports.isEmpty();
 
         String url = intent == null ? null : intent.getStringExtra(EXTRA_DOCUMENT_URL);
         if (needsUrl && (url == null || !url.startsWith("https://"))) {
@@ -191,16 +197,24 @@ public final class OpenFluxProxyService extends Service {
         return START_STICKY;
     }
 
+    private String startCarrier(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid,
+            String listen, String username, String password) {
+        String specs = sessionTransports;
+        return specs.isEmpty()
+                ? Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password)
+                : Mobile.startSessionProxy(specs, encryptionSecret, listen, username, password);
+    }
+
     private void startProxyTransport(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String bindHost, int port,
             String username, String password, int session) {
         if (!isCurrent(session)) return;
         CaptchaActivity.initCookieStore(this);
         String listen = bindHost + ":" + port;
-        String error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
+        String error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
         // Some transports (Volga) fail Start outright on a captcha; retry
         // with the solved cookies, which the next Start replays.
         while (error != null && !error.isEmpty() && awaitCaptcha(session)) {
-            error = Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
+            error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
         }
         if (error != null && !error.isEmpty()) {
             fail(session, error);
@@ -223,7 +237,7 @@ public final class OpenFluxProxyService extends Service {
         }
         if (!isCurrent(session)) return;
         if (!Mobile.proxyIsConnected()) {
-            fail(session, "Yandex-транспорт не подключился за 30 секунд");
+            fail(session, "Транспорт не подключился за 30 секунд");
             return;
         }
 
