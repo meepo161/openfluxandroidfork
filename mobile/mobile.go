@@ -37,7 +37,7 @@ func appendLog(message string) {
 }
 
 // Start connects the packet transport. transportType is "yandex" (default
-// when empty), "vyandex", "mailru", "cupsonline" or "oneme". documentURL is
+// when empty), "vyandex", "boards", "mailru", "cupsonline" or "oneme". documentURL is
 // required for all but "oneme", which instead needs maxToken (and optionally
 // maxUid). codec is "batched" (default, zstd+coalescing, matches the CLI's
 // --codec=batched) or "legacy" (per-packet LZ4; both peers must agree). It
@@ -72,6 +72,8 @@ func Start(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid
 	switch transportType {
 	case "vyandex":
 		inner = yandex.NewYandexVolgaTransport(documentURL, config)
+	case "boards":
+		inner = yandex.NewBoardsTransport(documentURL, config)
 	case "mailru":
 		inner = mailru.NewMailruDocsTransport(documentURL, config)
 	case "cupsonline":

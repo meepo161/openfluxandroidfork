@@ -66,6 +66,8 @@ func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, m
 	switch transportType {
 	case "vyandex":
 		inner = yandex.NewYandexVolgaTransport(documentURL, config)
+	case "boards":
+		inner = yandex.NewBoardsTransport(documentURL, config)
 	case "mailru":
 		inner = mailru.NewMailruDocsTransport(documentURL, config)
 	case "cupsonline":

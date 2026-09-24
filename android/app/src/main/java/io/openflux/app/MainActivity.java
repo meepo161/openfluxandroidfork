@@ -796,6 +796,7 @@ public final class MainActivity extends Activity {
 
     private String transportLabel(String type) {
         if ("vyandex".equals(type)) return "Yandex Docs (Volga)";
+        if ("boards".equals(type)) return "Yandex Board";
         if ("mailru".equals(type)) return "Mail.ru Docs";
         if ("cupsonline".equals(type)) return "Cups.online";
         if ("oneme".equals(type)) return "MAX (OneMe)";
@@ -2000,15 +2001,18 @@ public final class MainActivity extends Activity {
         group.setOrientation(LinearLayout.VERTICAL);
         RadioButton yandexButton = modeRadio("Yandex Docs");
         RadioButton vyandexButton = modeRadio("Yandex Docs (Volga, экспериментальный)");
+        RadioButton boardsButton = modeRadio("Yandex Board (экспериментальный)");
         RadioButton mailruButton = modeRadio("Mail.ru Docs");
         RadioButton cupsButton = modeRadio("Cups.online");
         RadioButton maxButton = modeRadio("MAX (OneMe)");
         group.addView(yandexButton);
         group.addView(vyandexButton);
+        group.addView(boardsButton);
         group.addView(mailruButton);
         group.addView(cupsButton);
         group.addView(maxButton);
         if ("vyandex".equals(editorTransportType)) vyandexButton.setChecked(true);
+        else if ("boards".equals(editorTransportType)) boardsButton.setChecked(true);
         else if ("mailru".equals(editorTransportType)) mailruButton.setChecked(true);
         else if ("cupsonline".equals(editorTransportType)) cupsButton.setChecked(true);
         else if ("oneme".equals(editorTransportType)) maxButton.setChecked(true);
@@ -2016,6 +2020,7 @@ public final class MainActivity extends Activity {
         group.setOnCheckedChangeListener((g, checkedId) -> {
             tap(g);
             if (checkedId == vyandexButton.getId()) editorTransportType = "vyandex";
+            else if (checkedId == boardsButton.getId()) editorTransportType = "boards";
             else if (checkedId == mailruButton.getId()) editorTransportType = "mailru";
             else if (checkedId == cupsButton.getId()) editorTransportType = "cupsonline";
             else if (checkedId == maxButton.getId()) editorTransportType = "oneme";
