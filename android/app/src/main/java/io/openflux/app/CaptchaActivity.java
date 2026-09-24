@@ -18,6 +18,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.webkit.ProxyConfig;
+import androidx.webkit.ProxyController;
+import androidx.webkit.WebViewFeature;
+
 import java.io.File;
 import java.util.function.BooleanSupplier;
 
@@ -38,6 +42,10 @@ public final class CaptchaActivity extends Activity {
     private static volatile boolean solved;
 
     private String startUrl;
+    // Set when the check belongs to the exit node: the page must load through
+    // this proxy (the tunnel) so it is passed from the node's address.
+    private String proxy = "";
+    private boolean proxyOverridden;
     private String currentUrl;
     private boolean sawCheckpoint;
     private boolean submitted;
@@ -59,8 +67,12 @@ public final class CaptchaActivity extends Activity {
         PendingIntent content = PendingIntent.getActivity(
                 context, 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         boolean login = "login".equals(Mobile.pendingCaptchaReason());
+        boolean remote = !Mobile.pendingCaptchaProxy().isEmpty();
+        String title = remote
+                ? (login ? "OpenFlux: ноде нужен вход в Яндекс" : "OpenFlux: нода просит пройти проверку")
+                : (login ? "OpenFlux: нужен вход в Яндекс" : "OpenFlux: нужна проверка");
         manager.notify(NOTIFICATION_ID, new Notification.Builder(context, CHANNEL_ID)
-                .setContentTitle(login ? "OpenFlux: нужен вход в Яндекс" : "OpenFlux: нужна проверка")
+                .setContentTitle(title)
                 .setContentText("Нажмите, чтобы продолжить подключение")
                 .setSmallIcon(R.drawable.ic_openflux_notification)
                 .setAutoCancel(true)
@@ -86,9 +98,13 @@ public final class CaptchaActivity extends Activity {
             return;
         }
         boolean login = "login".equals(Mobile.pendingCaptchaReason());
+        proxy = Mobile.pendingCaptchaProxy();
+        boolean remote = !proxy.isEmpty();
 
         TextView title = new TextView(this);
-        title.setText(login ? "Войдите в Яндекс" : "Пройдите проверку");
+        title.setText(remote
+                ? (login ? "Вход в Яндекс для ноды" : "Проверка для ноды")
+                : (login ? "Войдите в Яндекс" : "Пройдите проверку"));
         title.setTextSize(16);
         Button done = new Button(this);
         done.setText("Готово");
@@ -129,7 +145,25 @@ public final class CaptchaActivity extends Activity {
         root.addView(bar);
         root.addView(web, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
-        web.loadUrl(startUrl);
+        if (!remote) {
+            web.loadUrl(startUrl);
+            return;
+        }
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            Toast.makeText(this, "WebView не умеет работать через прокси: обновите Android System WebView",
+                    Toast.LENGTH_LONG).show();
+            cancel();
+            return;
+        }
+        ProxyConfig config = new ProxyConfig.Builder().addProxyRule(proxy).build();
+        proxyOverridden = true;
+        ProxyController.getInstance().setProxyOverride(config, Runnable::run, () -> web.loadUrl(startUrl));
+    }
+
+    @Override protected void onDestroy() {
+        // The override applies to every WebView in the process; drop it.
+        if (proxyOverridden) ProxyController.getInstance().clearProxyOverride(Runnable::run, () -> { });
+        super.onDestroy();
     }
 
     @Override public void onBackPressed() {

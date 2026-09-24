@@ -222,7 +222,9 @@ public final class OpenFluxProxyService extends Service {
         }
 
         for (int attempt = 0; isCurrent(session) && !Mobile.proxyIsConnected() && attempt < 120; attempt++) {
-            if (!Mobile.pendingCaptchaURL().isEmpty()) {
+            // Only the phone's own checks block connecting; the node's are
+            // handled by the health checker once the tunnel is up.
+            if (!Mobile.pendingCaptchaURL().isEmpty() && Mobile.pendingCaptchaProxy().isEmpty()) {
                 if (!awaitCaptcha(session)) {
                     if (isCurrent(session)) fail(session, "Проверка Яндекса не пройдена");
                     return;
@@ -248,6 +250,14 @@ public final class OpenFluxProxyService extends Service {
 
     private boolean awaitCaptcha(int session) {
         if (Mobile.pendingCaptchaURL().isEmpty()) return false;
+        if (!Mobile.pendingCaptchaProxy().isEmpty()) {
+            // The node's own document carrier is stuck; the tunnel itself
+            // keeps working over another transport, so the status stays.
+            lastError = "Нода просит пройти проверку Яндекса - откройте уведомление";
+            boolean solved = CaptchaActivity.awaitIfPending(this, () -> isCurrent(session));
+            lastError = solved ? "Cookies отправлены на ноду" : "";
+            return solved;
+        }
         status = "Нужна проверка";
         lastError = "Яндекс запросил проверку - откройте уведомление";
         boolean solved = CaptchaActivity.awaitIfPending(this, () -> isCurrent(session));
