@@ -21,6 +21,8 @@ import (
 //	OPENFLUX_TEST_CORE_SHA=...              sha256 of the core preinstalled
 //	                                        as /opt/openflux-node/bin/openflux-<ver>
 //	OPENFLUX_TEST_DOC=https://docs.yandex.ru/edit/d/...
+//	OPENFLUX_TEST_PINNED=1                  use the real pinned script and
+//	                                        release core from GitHub instead
 //
 // The test process must share the VDS's loopback (docker --network
 // container:<vds>): the VDS downloads the script from the test's server.
@@ -48,6 +50,9 @@ func TestInstallOnVDS(t *testing.T) {
 	defer srv.Close()
 	allowPlainScriptURL = true
 	good := Script{URL: "http://" + ln.Addr().String() + "/node-install.sh", SHA256: ScriptHash(script)}
+	if os.Getenv("OPENFLUX_TEST_PINNED") != "" {
+		good = Pinned()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
