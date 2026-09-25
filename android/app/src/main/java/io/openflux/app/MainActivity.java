@@ -2469,8 +2469,8 @@ public final class MainActivity extends Activity {
                 {"Mail.ru Docs", "Документ в Облаке Mail.ru"},
                 {"Cups.online", "Комнаты live-coding, код комнат с ноды"},
                 {"MAX (OneMe)", "Звонок MAX, нужен Web token"},
-        }, new int[]{R.drawable.ic_brand_yandex, R.drawable.ic_brand_yandex, R.drawable.ic_brand_yandex,
-                R.drawable.ic_brand_mailru, R.drawable.ic_code, R.drawable.ic_brand_max}, current, i -> {
+        }, new int[]{R.drawable.ic_yandex, R.drawable.ic_yandex, R.drawable.ic_yandex,
+                R.drawable.ic_brand_mailru, R.drawable.ic_code, R.drawable.ic_max}, current, i -> {
             editorTransportType = types[i];
             if (maxFieldsContainer != null) {
                 maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
@@ -2668,7 +2668,7 @@ public final class MainActivity extends Activity {
 
     private static int presetIcon(String id) {
         switch (id) {
-            case "ru": return R.drawable.ic_brand_ru;
+            case "ru": return R.drawable.ic_gerb;
             case "youtube": return R.drawable.ic_brand_youtube;
             case "discord": return R.drawable.ic_brand_discord;
             case "ai": return R.drawable.ic_brand_openai;
@@ -2859,7 +2859,7 @@ public final class MainActivity extends Activity {
         logo.setImageResource(iconRes);
         // OpenAI's mark is monochrome: it follows the text color.
         if (name.equals("ic_brand_openai")) logo.setImageTintList(ColorStateList.valueOf(text));
-        int size = name.equals("ic_brand_ru") ? dp(28) : dp(24);
+        int size = dp(24);
         bubble.addView(logo, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
         return bubble;
     }
