@@ -2470,7 +2470,7 @@ public final class MainActivity extends Activity {
                 {"Cups.online", "Комнаты live-coding, код комнат с ноды"},
                 {"MAX (OneMe)", "Звонок MAX, нужен Web token"},
         }, new int[]{R.drawable.ic_yandex, R.drawable.ic_yandex, R.drawable.ic_yandex,
-                R.drawable.ic_brand_mailru, R.drawable.ic_code, R.drawable.ic_max}, current, i -> {
+                R.drawable.ic_mailru, R.drawable.ic_code, R.drawable.ic_max}, current, i -> {
             editorTransportType = types[i];
             if (maxFieldsContainer != null) {
                 maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
