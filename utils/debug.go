@@ -5,18 +5,21 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 )
 
+// verbose is atomic and the logger is created once because the mobile
+// bridge enables debug on every start, while goroutines of the previous
+// connection may still be logging.
 var (
-	debugLog  *log.Logger
-	verbose   bool
+	debugLog  = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
+	verbose   atomic.Bool
 	logSinkMu sync.RWMutex
 	logSink   func(string)
 )
 
 func EnableDebug() {
-	verbose = true
-	debugLog = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
+	verbose.Store(true)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
 }
 
@@ -26,11 +29,11 @@ func SetDebug(on bool) {
 		EnableDebug()
 		return
 	}
-	verbose = false
+	verbose.Store(false)
 }
 
 func Debugf(format string, args ...interface{}) {
-	if verbose {
+	if verbose.Load() {
 		message := fmt.Sprintf(format, args...)
 		debugLog.Output(2, message)
 
@@ -51,7 +54,7 @@ func SetLogSink(sink func(string)) {
 }
 
 func IsVerbose() bool {
-	return verbose
+	return verbose.Load()
 }
 
 // SafeGo runs fn in a new goroutine, recovering from any panic so a crash in
