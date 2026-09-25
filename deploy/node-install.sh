@@ -19,6 +19,8 @@
 # Usage: node-install.sh probe
 #        node-install.sh plan|status              (config on stdin)
 #        node-install.sh apply|remove CONFIG_FILE (run as root)
+#        node-install.sh upgrade                  (run as root: move every
+#                                                 channel to this core)
 # The config is "key=value" lines: channel, url, key, port. apply and remove
 # take it from a 0600 temp file, which they delete after reading, so that
 # stdin stays free for `sudo -S` (a wrong sudo password would otherwise make
@@ -29,11 +31,11 @@
 set -u
 umask 077
 
-CORE_VERSION="node-v1.2.0"
+CORE_VERSION="node-v1.2.1"
 CORE_BASE="https://github.com/meepo161/openfluxandroidfork/releases/download/$CORE_VERSION"
-SHA_amd64="470cc6f4eb2cd441b9102d7e4d8aad024a50b848f498d7c4b9f2e8db095ca52f"
-SHA_arm64="991cfaf7e14c685274339b03076df20d54904cb35e7d0e4cf0be746f81160f03"
-SHA_arm="591b3bcf91940e11c46239ce05164a10d59271864a2e42f23c2cdf8fee1071fb"
+SHA_amd64="e6df515f76f7e11d357b335043e9f7881dad1c628e56a008a819546a81772265"
+SHA_arm64="24e4b594f8a6293c5d6887a7b3200d9e40f3bbb84f829b12f2128e1770a75913"
+SHA_arm="f900784b045edfaa8548be7ed0deeabaea3435599ec899a1316261bcf9547fa6"
 
 BIN_DIR="/opt/openflux-node/bin"
 CONF_ROOT="/etc/openflux-node"
@@ -265,6 +267,32 @@ apply_fail() {
     fail "$1" "$2"
 }
 
+# install_core ARCH: puts this script's core version into BIN_DIR, checked
+# against its pinned SHA-256, and points BIN_DIR/openflux at it. Sets
+# CREATED_BIN when it downloaded, CORE_ERROR on failure.
+CORE_ERROR=""
+install_core() {
+    mkdir -p "$BIN_DIR" && chmod 0755 /opt/openflux-node "$BIN_DIR"
+    core="$BIN_DIR/openflux-$CORE_VERSION"
+    want=$(core_sha "$1")
+    if [ ! -x "$core" ] || [ "$(sha256_of "$core")" != "$want" ]; then
+        tmp=$(mktemp "$BIN_DIR/.download.XXXXXX") || { CORE_ERROR="не удалось создать временный файл"; return 1; }
+        if ! fetch "$CORE_BASE/openflux-linux-$1" "$tmp"; then
+            rm -f "$tmp"
+            CORE_ERROR="не удалось скачать ядро с GitHub"
+            return 1
+        fi
+        if [ "$(sha256_of "$tmp")" != "$want" ]; then
+            rm -f "$tmp"
+            CORE_ERROR="SHA-256 скачанного ядра не совпал, установка остановлена"
+            return 1
+        fi
+        chmod 0755 "$tmp" && mv -f "$tmp" "$core"
+        CREATED_BIN=1
+    fi
+    ln -sfn "openflux-$CORE_VERSION" "$BIN_DIR/openflux"
+}
+
 write_unit() {
     cat > "$UNIT_FILE" <<EOF
 $MARKER
@@ -326,23 +354,7 @@ cmd_apply() {
         CREATED_USER=1
     fi
 
-    mkdir -p "$BIN_DIR" && chmod 0755 /opt/openflux-node "$BIN_DIR"
-    core="$BIN_DIR/openflux-$CORE_VERSION"
-    want=$(core_sha "$arch")
-    if [ ! -x "$core" ] || [ "$(sha256_of "$core")" != "$want" ]; then
-        tmp=$(mktemp "$BIN_DIR/.download.XXXXXX") || apply_fail download "не удалось создать временный файл"
-        if ! fetch "$CORE_BASE/openflux-linux-$arch" "$tmp"; then
-            rm -f "$tmp"
-            apply_fail download "не удалось скачать ядро с GitHub"
-        fi
-        if [ "$(sha256_of "$tmp")" != "$want" ]; then
-            rm -f "$tmp"
-            apply_fail download "SHA-256 скачанного ядра не совпал, установка остановлена"
-        fi
-        chmod 0755 "$tmp" && mv -f "$tmp" "$core"
-        CREATED_BIN=1
-    fi
-    ln -sfn "openflux-$CORE_VERSION" "$BIN_DIR/openflux"
+    install_core "$arch" || apply_fail download "$CORE_ERROR"
 
     mkdir -p "$CONF_ROOT" && chmod 0755 "$CONF_ROOT"
     dir="$CONF_ROOT/$CHANNEL"
@@ -428,6 +440,29 @@ cmd_remove() {
     printf '{"ok":true,"channel":"%s"}\n' "$CHANNEL"
 }
 
+# upgrade: switches every channel to this script's core and restarts the
+# running ones. Configs, keys and ports stay as they are.
+cmd_upgrade() {
+    [ "$(id -u)" = 0 ] || fail upgrade "нужны права root (sudo)"
+    [ -n "$(list_channels)" ] || fail upgrade "на сервере нет каналов OpenFlux"
+    arch=$(detect_arch)
+    [ -n "$arch" ] || fail upgrade "архитектура $(uname -m) не поддерживается"
+    install_core "$arch" || fail upgrade "$CORE_ERROR"
+    set --
+    for ch in $(list_channels); do
+        if systemctl is-active --quiet "openflux-node@$ch"; then
+            systemctl restart "openflux-node@$ch" || fail upgrade "не удалось перезапустить openflux-node@$ch"
+            set -- "$@" "$ch"
+        fi
+    done
+    # Older cores nothing points at any more.
+    for old in "$BIN_DIR"/openflux-node-v*; do
+        [ "$old" = "$BIN_DIR/openflux-$CORE_VERSION" ] || rm -f "$old"
+    done
+    printf '{"ok":true,"core":"%s","restarted":%s}
+' "$CORE_VERSION" "$(json_list "$@")"
+}
+
 cmd_status() {
     read_config
     check_channel
@@ -442,5 +477,6 @@ case "${1:-}" in
     apply) shift; cmd_apply "$@" ;;
     remove) shift; cmd_remove "$@" ;;
     status) cmd_status ;;
-    *) fail usage "usage: node-install.sh probe|plan|apply|remove|status" ;;
+    upgrade) cmd_upgrade ;;
+    *) fail usage "usage: node-install.sh probe|plan|apply|remove|status|upgrade" ;;
 esac
