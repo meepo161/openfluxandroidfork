@@ -30,6 +30,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -46,6 +47,7 @@ public final class OpenFluxTunnelService extends VpnService {
     public static final String EXTRA_CODEC = "codec";
     public static final String EXTRA_MAX_TOKEN = "max_token";
     public static final String EXTRA_MAX_UID = "max_uid";
+    public static final String EXTRA_SESSION_TRANSPORTS = "session_transports";
 
     private static final String CHANNEL_ID = "openflux_tunnel";
     private static final int NOTIFICATION_ID = 7;
@@ -60,6 +62,10 @@ public final class OpenFluxTunnelService extends VpnService {
     private final ExecutorService workers = Executors.newCachedThreadPool();
     private final Object outputLock = new Object();
     private final AtomicInteger generation = new AtomicInteger();
+    private final AtomicBoolean awaitingCaptcha = new AtomicBoolean();
+    // Session mode (Mobile.startSession): the profile's transport list as
+    // JSON, or empty for the classic single-transport mode.
+    private volatile String sessionTransports = "";
     private volatile boolean active;
     private ParcelFileDescriptor tunnel;
     private FileInputStream tunnelInput;
@@ -82,7 +88,10 @@ public final class OpenFluxTunnelService extends VpnService {
             lastSampledSent = sent;
             lastSampledReceived = received;
             lastSampledAt = now;
-            updateNotification("↑ " + formatSpeed(sentPerSec) + "   ↓ " + formatSpeed(receivedPerSec));
+            String speeds = "↑ " + formatSpeed(sentPerSec) + "   ↓ " + formatSpeed(receivedPerSec);
+            // The carrier traffic goes through right now; follows failover.
+            String carrier = Mobile.currentTransport();
+            updateNotification(carrier.isEmpty() ? speeds : speeds + " · " + Profile.transportLabel(carrier));
             notificationHandler.postDelayed(this, 1000);
         }
     };
@@ -97,6 +106,14 @@ public final class OpenFluxTunnelService extends VpnService {
     // state honestly instead of just failing silently.
     private final Runnable healthChecker = new Runnable() {
         @Override public void run() {
+            if (running && !Mobile.pendingCaptchaURL().isEmpty() && awaitingCaptcha.compareAndSet(false, true)) {
+                // Captcha hit on a mid-session reconnect, not during the initial connect.
+                int session = generation.get();
+                new Thread(() -> {
+                    try { awaitCaptcha(session); }
+                    finally { awaitingCaptcha.set(false); }
+                }).start();
+            }
             if (running) {
                 boolean connected = Mobile.isConnected();
                 if (!connected && "Подключено".equals(status)) {
@@ -156,7 +173,9 @@ public final class OpenFluxTunnelService extends VpnService {
         String transportTypeExtra = intent == null ? null : intent.getStringExtra(EXTRA_TRANSPORT_TYPE);
         final String transportType = transportTypeExtra == null || transportTypeExtra.isEmpty()
                 ? "yandex" : transportTypeExtra;
-        boolean needsUrl = !"oneme".equals(transportType);
+        String sessionExtra = intent == null ? null : intent.getStringExtra(EXTRA_SESSION_TRANSPORTS);
+        sessionTransports = sessionExtra == null ? "" : sessionExtra;
+        boolean needsUrl = !"oneme".equals(transportType) && sessionTransports.isEmpty();
 
         String url = intent == null ? null : intent.getStringExtra(EXTRA_DOCUMENT_URL);
         if (needsUrl && (url == null || !url.startsWith("https://"))) {
@@ -218,15 +237,37 @@ public final class OpenFluxTunnelService extends VpnService {
         return "1.1.1.1";
     }
 
+    private String startCarrier(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid) {
+        String specs = sessionTransports;
+        return specs.isEmpty()
+                ? Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid)
+                : Mobile.startSession(specs, encryptionSecret);
+    }
+
     private void startTunnel(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String dnsServerParam, int mtu, int session) {
         if (!isCurrent(session)) return;
-        String error = Mobile.start(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+        CaptchaActivity.initCookieStore(this);
+        String error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+        // Some transports (Volga) fail Start outright on a captcha; retry
+        // with the solved cookies, which the next Start replays.
+        while (error != null && !error.isEmpty() && awaitCaptcha(session)) {
+            error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid);
+        }
         if (error != null && !error.isEmpty()) {
             fail(session, error);
             return;
         }
 
         for (int attempt = 0; isCurrent(session) && !Mobile.isConnected() && attempt < 120; attempt++) {
+            // Only the phone's own checks block connecting; the node's are
+            // handled by the health checker once the tunnel is up.
+            if (!Mobile.pendingCaptchaURL().isEmpty() && Mobile.pendingCaptchaProxy().isEmpty()) {
+                if (!awaitCaptcha(session)) {
+                    if (isCurrent(session)) fail(session, "Проверка Яндекса не пройдена");
+                    return;
+                }
+                attempt = 0;
+            }
             try { Thread.sleep(250); }
             catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -235,7 +276,7 @@ public final class OpenFluxTunnelService extends VpnService {
         }
         if (!isCurrent(session)) return;
         if (!Mobile.isConnected()) {
-            fail(session, "Yandex-транспорт не подключился за 30 секунд");
+            fail(session, "Транспорт не подключился за 30 секунд");
             return;
         }
 
@@ -339,7 +380,7 @@ public final class OpenFluxTunnelService extends VpnService {
                 byte[] packet = Arrays.copyOf(buffer, length);
                 if (isIpv4UdpDns(packet)) {
                     workers.execute(() -> forwardDns(session, outputFor(session), packet, dnsServer));
-                } else if (isIpv4Tcp(packet)) {
+                } else if (isIpv4Tcp(packet) || isIpv4Udp(packet)) {
                     String error = Mobile.send(packet);
                     if (error != null && !error.isEmpty() && isCurrent(session)) {
                         lastError = "Отправка пакета: " + error;
@@ -422,8 +463,37 @@ public final class OpenFluxTunnelService extends VpnService {
         return active && generation.get() == session;
     }
 
+    private boolean awaitCaptcha(int session) {
+        if (Mobile.pendingCaptchaURL().isEmpty()) return false;
+        if (!Mobile.pendingCaptchaProxy().isEmpty()) {
+            // The node's own document carrier is stuck; the tunnel itself
+            // keeps working over another transport, so the status stays.
+            lastError = "Нода просит пройти проверку Яндекса - откройте уведомление";
+            boolean solved = CaptchaActivity.awaitIfPending(this, () -> isCurrent(session));
+            lastError = solved ? "Cookies отправлены на ноду" : "";
+            return solved;
+        }
+        status = "Нужна проверка";
+        lastError = "Яндекс запросил проверку - откройте уведомление";
+        boolean solved = CaptchaActivity.awaitIfPending(this, () -> isCurrent(session));
+        if (solved) {
+            status = "Подключение…";
+            lastError = "";
+        }
+        return solved;
+    }
+
     private static boolean isIpv4Tcp(byte[] packet) {
         return packet.length >= 20 && (packet[0] >>> 4) == 4 && (packet[9] & 0xff) == 6;
+    }
+
+    // Non-DNS UDP (isIpv4UdpDns handles port 53 separately, resolved locally
+    // instead of round-tripping through the tunnel). The exit node forwards
+    // this like any other IPv4 packet; an older exit node without UDP NAT
+    // support (see tunnel/l3/udp_nat.go) just drops it, same as today.
+    private static boolean isIpv4Udp(byte[] packet) {
+        return packet.length >= 20 && (packet[0] >>> 4) == 4 && (packet[9] & 0xff) == 17
+                && !isIpv4UdpDns(packet);
     }
 
     private static boolean isIpv4UdpDns(byte[] packet) {
