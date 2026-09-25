@@ -278,6 +278,10 @@ func (t *TCPTunnel) setupClient(tunnelNIC tcpip.NICID) {
 	})
 }
 
+// dialTimeout bounds DialTCP. Over a transport that is down the handshake
+// never completes, and gonet.DialTCP would wait for it indefinitely.
+var dialTimeout = 10 * time.Second
+
 func (t *TCPTunnel) DialTCP(address string) (net.Conn, error) {
 	host, portStr, err := net.SplitHostPort(address)
 	if err != nil {
@@ -299,19 +303,19 @@ func (t *TCPTunnel) DialTCP(address string) (net.Conn, error) {
 		nic = tcpip.NICID(2)
 	}
 
-	// Bounded, not gonet.DialTCP's unbounded wait: if the transport is down
-	// (kill-switch territory - see tunnel.go's DialTCP callers), a TCP
-	// handshake over it never completes, and callers would otherwise hang
-	// indefinitely instead of getting a clean "connection failed".
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 	conn, err := gonet.DialContextTCP(ctx, t.gvisorStack, tcpip.FullAddress{
 		NIC:  nic,
 		Addr: tcpip.AddrFrom4([4]byte{ip[0], ip[1], ip[2], ip[3]}),
 		Port: uint16(port),
 	}, ipv4.ProtocolNumber)
-
-	return conn, err
+	if err != nil {
+		// Not "return conn, err": a nil *gonet.TCPConn in a net.Conn is a
+		// non-nil interface, and callers checking conn != nil would crash.
+		return nil, err
+	}
+	return conn, nil
 }
 
 // resolveIPv4 resolves host to an IPv4 address using the local system
