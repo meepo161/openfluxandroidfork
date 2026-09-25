@@ -6,8 +6,8 @@ package provision
 // changes, commit it, then point PinnedCommit at that commit.
 const (
 	PinnedRepo   = "meepo161/openfluxandroidfork"
-	PinnedCommit = "9d5add66eb6026efa7a06853fb1cefdcdac2af47"
-	PinnedSHA256 = "3d5d0dca9a9c41bbd289ceae20f9de6fceebc1c617a2753a77414a5e5ca8a7af"
+	PinnedCommit = "31b05beeba4e992b53d056302598dacd60c3b997"
+	PinnedSHA256 = "f7027e38eb17cbc51f9412b4df063e6678b8cfded54f49e418ca2b7fc3447290"
 )
 
 // Pinned returns the script location for this build.
