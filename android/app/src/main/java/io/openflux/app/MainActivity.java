@@ -206,6 +206,8 @@ public final class MainActivity extends Activity {
     private final List<Profile.Transport> editorExtras = new ArrayList<>();
     private View sessionFieldsContainer;
     private View codecSection;
+    private View urlField;
+    private TextView encryptionHintView;
     private EditText priorityInput;
     private LinearLayout extrasList;
     private EditText profileNameInput;
@@ -2151,16 +2153,16 @@ public final class MainActivity extends Activity {
 
         LinearLayout.LayoutParams urlParams = new LinearLayout.LayoutParams(-1, dp(56));
         urlParams.topMargin = dp(18);
-        section.addView(buildUrlField(initialUrl), urlParams);
+        urlField = buildUrlField(initialUrl);
+        // MAX has its own token field above; the link field would duplicate it.
+        urlField.setVisibility("oneme".equals(editorTransportType) ? View.GONE : View.VISIBLE);
+        section.addView(urlField, urlParams);
 
         LinearLayout.LayoutParams encryptionParams = new LinearLayout.LayoutParams(-1, dp(56));
         encryptionParams.topMargin = dp(16);
         section.addView(buildEncryptionField(initialSecret), encryptionParams);
-        TextView encryptionHint = text(
-                "Необязательно: оставьте пустым, чтобы подключаться без сквозного шифрования "
-                        + "(например, к обычному exit-node апстрима). Если заполняете - нужен "
-                        + "одинаковый секрет (минимум 16 символов) на телефоне и VDS.",
-                11, secondary, false);
+        TextView encryptionHint = text("", 11, secondary, false);
+        encryptionHintView = encryptionHint;
         LinearLayout.LayoutParams encryptionHintParams = matchWrap();
         encryptionHintParams.topMargin = dp(5);
         encryptionHintParams.leftMargin = dp(4);
@@ -2251,6 +2253,16 @@ public final class MainActivity extends Activity {
             sessionFieldsContainer.setVisibility(editorSession ? View.VISIBLE : View.GONE);
         }
         if (codecSection != null) codecSection.setVisibility(editorSession ? View.GONE : View.VISIBLE);
+        // Session cannot run without the key; classic mode can.
+        setFloatingLabel(encryptionInput, editorSession
+                ? "Ключ сквозного шифрования" : "Ключ сквозного шифрования (необязательно)");
+        if (encryptionHintView != null) {
+            encryptionHintView.setText(editorSession
+                    ? "Обязателен для Session: одинаковый секрет (минимум 16 символов) на телефоне и ноде."
+                    : "Необязательно: оставьте пустым, чтобы подключаться без сквозного шифрования "
+                            + "(например, к обычному exit-node апстрима). Если заполняете - нужен "
+                            + "одинаковый секрет (минимум 16 символов) на телефоне и VDS.");
+        }
     }
 
     private View buildSessionFields() {
@@ -2532,6 +2544,7 @@ public final class MainActivity extends Activity {
                 maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
             }
             setFloatingLabel(urlInput, transportValueLabel(editorTransportType));
+            if (urlField != null) urlField.setVisibility("oneme".equals(editorTransportType) ? View.GONE : View.VISIBLE);
         });
         return group;
     }
