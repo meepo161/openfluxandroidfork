@@ -19,8 +19,8 @@ import java.util.Random;
 // shockwave rings, a confetti explosion, a shaking headline and a
 // vibration drum roll. Removes itself when done or when tapped.
 final class JoinCelebrationView extends View {
-    private static final long DURATION_MS = 3200;
-    private static final int PARTICLES = 220;
+    private static final long DURATION_MS = 4000;
+    private static final int PARTICLES = 320;
     private static final int[] COLORS = {
             Color.rgb(79, 124, 255), Color.rgb(34, 197, 94), Color.rgb(251, 191, 36),
             Color.rgb(239, 68, 68), Color.rgb(168, 85, 247), Color.rgb(6, 182, 212), Color.WHITE,
@@ -101,14 +101,24 @@ final class JoinCelebrationView extends View {
     }
 
     private void seed(float cx, float cy) {
-        float speed = Math.max(getWidth(), getHeight()) * 1.4f;
+        float w = getWidth(), h = getHeight();
+        float speed = Math.max(w, h);
         for (int i = 0; i < PARTICLES; i++) {
-            double angle = random.nextDouble() * Math.PI * 2;
-            float v = speed * (0.25f + random.nextFloat() * 0.75f);
-            px[i] = cx;
-            py[i] = cy;
-            vx[i] = (float) Math.cos(angle) * v;
-            vy[i] = (float) Math.sin(angle) * v - speed * 0.35f;
+            if (i % 2 == 0) {
+                // Burst from the headline.
+                double angle = random.nextDouble() * Math.PI * 2;
+                float v = speed * (0.2f + random.nextFloat() * 0.8f);
+                px[i] = cx;
+                py[i] = cy;
+                vx[i] = (float) Math.cos(angle) * v;
+                vy[i] = (float) Math.sin(angle) * v - speed * 0.3f;
+            } else {
+                // Rain queued above the screen, falling in over the next seconds.
+                px[i] = random.nextFloat() * w;
+                py[i] = -random.nextFloat() * h * 1.5f;
+                vx[i] = (random.nextFloat() - 0.5f) * w * 0.3f;
+                vy[i] = h * (0.1f + random.nextFloat() * 0.2f);
+            }
             rot[i] = random.nextFloat() * 360;
             spin[i] = (random.nextFloat() - 0.5f) * 900;
             size[i] = (4 + random.nextFloat() * 7) * density;
@@ -146,8 +156,8 @@ final class JoinCelebrationView extends View {
 
         // Confetti: ballistic flight with drag and gravity.
         paint.setStyle(Paint.Style.FILL);
-        float gravity = h * 0.9f;
-        float drag = (float) Math.pow(0.35, dt);
+        float gravity = h * 0.5f;
+        float drag = (float) Math.pow(0.5, dt);
         for (int i = 0; i < PARTICLES; i++) {
             vx[i] *= drag;
             vy[i] = vy[i] * drag + gravity * dt;
