@@ -118,6 +118,7 @@ public final class MainActivity extends Activity {
     private static final int SETTINGS_APPS = 2;
     private static final int SETTINGS_INTERFACE = 3;
     private static final int SETTINGS_ABOUT = 4;
+    private static final int SETTINGS_ROUTING = 5;
     private static final String[] PROFILE_ICON_KEYS = {
             "ic_public", "ic_link", "ic_lock", "ic_key", "ic_power",
             "ic_person", "ic_swap", "ic_terminal", "ic_apps", "ic_settings",
@@ -174,6 +175,7 @@ public final class MainActivity extends Activity {
     private ImageView tunnelPowerIcon;
     private TextView tunnelButtonText;
     private TextView uptimeView;
+    private TextView speedView;
     private View ringWave;
     private String documentUrl;
     private String encryptionSecret;
@@ -202,6 +204,7 @@ public final class MainActivity extends Activity {
     private PopupWindow profileDropdown;
     private String dnsServer;
     private int mtu;
+    private boolean killSwitchEnabled = true;
     private String connectionMode = MODE_TUNNEL;
     private int proxyPort = DEFAULT_PROXY_PORT;
     private boolean proxyLanAccess;
@@ -215,6 +218,7 @@ public final class MainActivity extends Activity {
     private String editorDnsServer = "";
     private boolean editorDnsAuto = true;
     private int editorMtu;
+    private boolean editorKillSwitchEnabled = true;
     private String editorConnectionMode = MODE_TUNNEL;
     private int editorProxyPort = DEFAULT_PROXY_PORT;
     private boolean editorProxyLanAccess;
@@ -245,6 +249,11 @@ public final class MainActivity extends Activity {
     private SharedPreferences appFilterPrefs;
     private String appFilterMode = AppFilter.MODE_OFF;
     private final LinkedHashSet<String> selectedApps = new LinkedHashSet<>();
+    private SharedPreferences domainFilterPrefs;
+    private final LinkedHashSet<String> enabledDomainPresets = new LinkedHashSet<>();
+    private final LinkedHashSet<String> customDomains = new LinkedHashSet<>();
+    private final LinkedHashSet<String> editorEnabledDomainPresets = new LinkedHashSet<>();
+    private EditText customDomainsInput;
     private List<AppEntry> installedAppsCache;
 
     private final Runnable refresh = new Runnable() {
@@ -273,6 +282,7 @@ public final class MainActivity extends Activity {
         applySelectedProfileToFields();
         dnsServer = prefs.getString("dns_server", "");
         mtu = prefs.getInt("mtu", DEFAULT_MTU);
+        killSwitchEnabled = prefs.getBoolean("kill_switch", true);
         String savedMode = prefs.getString("connection_mode", MODE_TUNNEL);
         connectionMode = MODE_PROXY.equals(savedMode) || MODE_EXIT.equals(savedMode) ? savedMode : MODE_TUNNEL;
         proxyPort = prefs.getInt("proxy_port", DEFAULT_PROXY_PORT);
@@ -288,6 +298,9 @@ public final class MainActivity extends Activity {
         appFilterPrefs = getSharedPreferences(AppFilter.PREFS_NAME, MODE_PRIVATE);
         appFilterMode = appFilterPrefs.getString(AppFilter.KEY_MODE, AppFilter.MODE_OFF);
         selectedApps.addAll(appFilterPrefs.getStringSet(AppFilter.KEY_PACKAGES, Collections.emptySet()));
+        domainFilterPrefs = getSharedPreferences(DomainFilter.PREFS_NAME, MODE_PRIVATE);
+        enabledDomainPresets.addAll(DomainFilter.loadEnabledPresets(domainFilterPrefs));
+        customDomains.addAll(DomainFilter.loadCustomDomains(domainFilterPrefs));
         appVersion = readAppVersion();
         applyPalette();
         configureSystemBars();
@@ -722,6 +735,7 @@ public final class MainActivity extends Activity {
             editorDnsServer = dnsServer;
             editorDnsAuto = dnsServer.isEmpty();
             editorMtu = mtu;
+            editorKillSwitchEnabled = killSwitchEnabled;
         } else if (tab == SETTINGS_MODE) {
             editorConnectionMode = connectionMode;
             editorProxyPort = proxyPort;
@@ -735,6 +749,9 @@ public final class MainActivity extends Activity {
             editorAppFilterMode = appFilterMode;
             editorSelectedApps.clear();
             editorSelectedApps.addAll(selectedApps);
+        } else if (tab == SETTINGS_ROUTING) {
+            editorEnabledDomainPresets.clear();
+            editorEnabledDomainPresets.addAll(enabledDomainPresets);
         }
         showPage(PAGE_SETTINGS);
     }
@@ -1047,6 +1064,12 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams uptimeParams = matchWrap();
         uptimeParams.topMargin = dp(2);
         tunnelButton.addView(uptimeView, uptimeParams);
+        speedView = text("", 10, Color.WHITE, false);
+        speedView.setAlpha(0.7f);
+        speedView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams speedParams = matchWrap();
+        speedParams.topMargin = dp(2);
+        tunnelButton.addView(speedView, speedParams);
         tunnelButton.setOnClickListener(v -> {
             bounce(v);
             toggleConnection();
@@ -1226,6 +1249,7 @@ public final class MainActivity extends Activity {
                 else if (settingsSubTab == SETTINGS_MODE) applyModeSettings();
                 else if (settingsSubTab == SETTINGS_INTERFACE) applyInterfaceSettings();
                 else if (settingsSubTab == SETTINGS_APPS) applyAppsSettings();
+                else if (settingsSubTab == SETTINGS_ROUTING) applyRoutingSettings();
                 Toast.makeText(this, "Настройки сохранены", Toast.LENGTH_SHORT).show();
             });
             LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
@@ -1271,6 +1295,7 @@ public final class MainActivity extends Activity {
         switch (tab) {
             case SETTINGS_NETWORK: return "Сеть";
             case SETTINGS_APPS: return "Приложения";
+            case SETTINGS_ROUTING: return "Маршрутизация";
             case SETTINGS_INTERFACE: return "Вид";
             case SETTINGS_ABOUT: return "О проекте";
             case SETTINGS_MODE:
@@ -1294,6 +1319,9 @@ public final class MainActivity extends Activity {
         addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_apps, "Приложения",
                 "Какие приложения используют туннель", SETTINGS_APPS));
+        addDivider(list);
+        list.addView(settingsListRow(R.drawable.ic_public, "Маршрутизация",
+                "Сайты и сервисы в обход туннеля", SETTINGS_ROUTING));
         addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_dark_mode, "Вид",
                 "Тема и автопрокрутка логов", SETTINGS_INTERFACE));
@@ -1345,6 +1373,8 @@ public final class MainActivity extends Activity {
                 return wrapScroll(buildNetworkSettings());
             case SETTINGS_APPS:
                 return buildAppsSettings();
+            case SETTINGS_ROUTING:
+                return wrapScroll(buildRoutingSettings());
             case SETTINGS_INTERFACE:
                 return wrapScroll(buildInterfaceSettings());
             case SETTINGS_ABOUT:
@@ -2404,6 +2434,21 @@ public final class MainActivity extends Activity {
                         + "уменьшите (например, до 1280), если сайты грузятся не полностью "
                         + "или соединение обрывается."));
 
+        Switch killSwitchSwitch = settingSwitch(R.drawable.ic_lock, "Kill Switch",
+                "Блокировать трафик, если туннель отключился, вместо пропуска мимо него",
+                editorKillSwitchEnabled);
+        killSwitchSwitch.setOnCheckedChangeListener((button, checked) -> {
+            tap(button);
+            editorKillSwitchEnabled = checked;
+        });
+        LinearLayout.LayoutParams killSwitchParams = matchWrap();
+        killSwitchParams.topMargin = dp(16);
+        section.addView((View) killSwitchSwitch.getTag(), killSwitchParams);
+        section.addView(fieldHint(
+                "Включено: при обрыве соединения приложения теряют доступ в сеть, а не "
+                        + "продолжают работать в обход туннеля. Выключено: примерно через 30 "
+                        + "секунд без связи туннель отключится сам и сеть заработает как обычно."));
+
         return section;
     }
 
@@ -2419,6 +2464,7 @@ public final class MainActivity extends Activity {
             newMtu = DEFAULT_MTU;
         }
         mtu = Math.max(576, Math.min(1500, newMtu));
+        killSwitchEnabled = editorKillSwitchEnabled;
         persistSettings();
     }
 
@@ -2439,6 +2485,79 @@ public final class MainActivity extends Activity {
         selectedApps.clear();
         selectedApps.addAll(editorSelectedApps);
         persistAppFilter();
+    }
+
+    private View buildRoutingSettings() {
+        LinearLayout section = page();
+        TextView routingHint = text(
+                "Домены и сервисы ниже подключаются напрямую, в обход туннеля - полезно для "
+                        + "локальных сервисов и всего, что чувствительно к задержке.",
+                12, secondary, false);
+        section.addView(routingHint, matchWrap());
+
+        if (!isProxyMode()) {
+            TextView tunnelNote = text(
+                    "Пока работает только в режиме Прокси (SOCKS5). В режиме Туннель настройки "
+                            + "сохранятся, но не применяются - переключите режим работы, чтобы им пользоваться.",
+                    12, accent, false);
+            LinearLayout.LayoutParams tunnelNoteParams = matchWrap();
+            tunnelNoteParams.topMargin = dp(8);
+            section.addView(tunnelNote, tunnelNoteParams);
+        }
+
+        for (int i = 0; i < DomainFilter.PRESETS.length; i++) {
+            DomainFilter.Preset preset = DomainFilter.PRESETS[i];
+            Switch presetSwitch = settingSwitch(R.drawable.ic_public, preset.title, preset.description,
+                    editorEnabledDomainPresets.contains(preset.id));
+            presetSwitch.setOnCheckedChangeListener((button, checked) -> {
+                tap(button);
+                if (checked) editorEnabledDomainPresets.add(preset.id);
+                else editorEnabledDomainPresets.remove(preset.id);
+            });
+            LinearLayout.LayoutParams presetParams = matchWrap();
+            presetParams.topMargin = i == 0 ? dp(12) : dp(8);
+            section.addView((View) presetSwitch.getTag(), presetParams);
+        }
+
+        LinearLayout.LayoutParams customLabelParams = matchWrap();
+        customLabelParams.topMargin = dp(16);
+        section.addView(text("Свои домены", 13, secondary, false), customLabelParams);
+
+        customDomainsInput = new EditText(this);
+        customDomainsInput.setHint("youtube.com\nexample.org");
+        customDomainsInput.setHintTextColor(hint);
+        customDomainsInput.setText(String.join("\n", customDomains));
+        customDomainsInput.setTextSize(14);
+        customDomainsInput.setTextColor(text);
+        customDomainsInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        customDomainsInput.setMinLines(3);
+        customDomainsInput.setGravity(Gravity.TOP | Gravity.START);
+        customDomainsInput.setBackground(rounded(surface, border, 1, 10));
+        customDomainsInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams customInputParams = matchWrap();
+        customInputParams.topMargin = dp(6);
+        section.addView(customDomainsInput, customInputParams);
+        section.addView(fieldHint("По одному домену на строку, без http:// и путей - например youtube.com."));
+
+        return section;
+    }
+
+    private void applyRoutingSettings() {
+        enabledDomainPresets.clear();
+        enabledDomainPresets.addAll(editorEnabledDomainPresets);
+        customDomains.clear();
+        for (String line : customDomainsInput.getText().toString().split("\n")) {
+            String trimmed = line.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!trimmed.isEmpty()) customDomains.add(trimmed);
+        }
+        persistDomainFilter();
+    }
+
+    private void persistDomainFilter() {
+        domainFilterPrefs.edit()
+                .putStringSet(DomainFilter.KEY_ENABLED_PRESETS, new HashSet<>(enabledDomainPresets))
+                .putStringSet(DomainFilter.KEY_CUSTOM_DOMAINS, new HashSet<>(customDomains))
+                .apply();
     }
 
     private TextView fieldHint(String value) {
@@ -2862,6 +2981,7 @@ public final class MainActivity extends Activity {
                 .remove("connection_document_url")
                 .putString("dns_server", dnsServer)
                 .putInt("mtu", mtu)
+                .putBoolean("kill_switch", killSwitchEnabled)
                 .putString("connection_mode", connectionMode)
                 .putInt("proxy_port", proxyPort)
                 .putBoolean("proxy_lan_access", proxyLanAccess)
@@ -3021,9 +3141,17 @@ public final class MainActivity extends Activity {
             // reserves its height, which pushes the icon+status above dead
             // center in the button while there's no time to show yet.
             uptimeView.setVisibility(View.GONE);
+            speedView.setVisibility(View.GONE);
         } else {
             uptimeView.setVisibility(View.VISIBLE);
             uptimeView.setText(formatUptime(System.currentTimeMillis() - connectedAt));
+            long sentPerSec = isExitMode() ? OpenFluxExitService.getSentPerSec()
+                    : isProxyMode() ? OpenFluxProxyService.getSentPerSec() : OpenFluxTunnelService.getSentPerSec();
+            long receivedPerSec = isExitMode() ? OpenFluxExitService.getReceivedPerSec()
+                    : isProxyMode() ? OpenFluxProxyService.getReceivedPerSec() : OpenFluxTunnelService.getReceivedPerSec();
+            speedView.setVisibility(View.VISIBLE);
+            speedView.setText("↑ " + OpenFluxTunnelService.formatSpeed(sentPerSec)
+                    + "   ↓ " + OpenFluxTunnelService.formatSpeed(receivedPerSec));
         }
 
         if (state != null && !state.equals(lastAnnouncedState)) {
@@ -3071,6 +3199,7 @@ public final class MainActivity extends Activity {
         int contentColor = idle ? text : Color.WHITE;
         tunnelButtonText.setTextColor(contentColor);
         uptimeView.setTextColor(contentColor);
+        speedView.setTextColor(contentColor);
         if (tunnelPowerIcon != null) {
             tunnelPowerIcon.setImageTintList(ColorStateList.valueOf(contentColor));
         }

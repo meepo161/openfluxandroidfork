@@ -47,6 +47,9 @@ public final class OpenFluxExitService extends Service {
     private long lastSent;
     private long lastReceived;
     private long lastSampledAt;
+    // Read by MainActivity's Home screen, like the other services' speeds.
+    private static volatile long sentPerSec;
+    private static volatile long receivedPerSec;
     private final Runnable monitor = new Runnable() {
         @Override public void run() {
             if (!running) return;
@@ -64,8 +67,9 @@ public final class OpenFluxExitService extends Service {
             long elapsedMs = Math.max(1, now - lastSampledAt);
             long sent = Mobile.exitBytesSent();
             long received = Mobile.exitBytesReceived();
-            String speeds = "↑ " + formatSpeed((sent - lastSent) * 1000 / elapsedMs)
-                    + "   ↓ " + formatSpeed((received - lastReceived) * 1000 / elapsedMs);
+            sentPerSec = (sent - lastSent) * 1000 / elapsedMs;
+            receivedPerSec = (received - lastReceived) * 1000 / elapsedMs;
+            String speeds = "↑ " + formatSpeed(sentPerSec) + "   ↓ " + formatSpeed(receivedPerSec);
             lastSent = sent;
             lastReceived = received;
             lastSampledAt = now;
@@ -80,6 +84,8 @@ public final class OpenFluxExitService extends Service {
     public static String getStatus() { return status; }
     public static String getLastError() { return lastError; }
     public static long getConnectedAtMillis() { return connectedAtMillis; }
+    public static long getSentPerSec() { return sentPerSec; }
+    public static long getReceivedPerSec() { return receivedPerSec; }
 
     private static String formatSpeed(long bytesPerSecond) {
         if (bytesPerSecond < 1024) return bytesPerSecond + " Б/с";
@@ -215,6 +221,8 @@ public final class OpenFluxExitService extends Service {
     private void shutdown() {
         generation.incrementAndGet();
         handler.removeCallbacks(monitor);
+        sentPerSec = 0;
+        receivedPerSec = 0;
         Mobile.stopExit();
         releaseWakeLock();
         running = false;

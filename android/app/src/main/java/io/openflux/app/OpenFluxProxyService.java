@@ -6,12 +6,14 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
 
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -61,14 +63,18 @@ public final class OpenFluxProxyService extends Service {
     private long lastSampledSent;
     private long lastSampledReceived;
     private long lastSampledAt;
+    // Read by MainActivity's Home screen (getSentPerSec/getReceivedPerSec)
+    // to show live speed there too, not just in the notification.
+    private static volatile long sentPerSec;
+    private static volatile long receivedPerSec;
     private final Runnable speedUpdater = new Runnable() {
         @Override public void run() {
             long now = SystemClock.elapsedRealtime();
             long elapsedMs = Math.max(1, now - lastSampledAt);
             long sent = Mobile.proxyBytesSent();
             long received = Mobile.proxyBytesReceived();
-            long sentPerSec = (sent - lastSampledSent) * 1000 / elapsedMs;
-            long receivedPerSec = (received - lastSampledReceived) * 1000 / elapsedMs;
+            sentPerSec = (sent - lastSampledSent) * 1000 / elapsedMs;
+            receivedPerSec = (received - lastSampledReceived) * 1000 / elapsedMs;
             lastSampledSent = sent;
             lastSampledReceived = received;
             lastSampledAt = now;
@@ -80,9 +86,18 @@ public final class OpenFluxProxyService extends Service {
         }
     };
 
+    // 0 means "currently connected" - see OpenFluxTunnelService's identical
+    // field for why, and for the Kill Switch off grace-period watchdog this
+    // feeds below.
+    private volatile long disconnectedSinceMs;
+    private static final long KILL_SWITCH_GRACE_MS = 30_000;
+
     // healthChecker keeps "Подключено" honest for the same reason as in
     // OpenFluxTunnelService: once set at initial connect, status would never
-    // reflect a later drop in the underlying transport without this.
+    // reflect a later drop in the underlying transport without this. Also
+    // implements the same Kill Switch off opt-out: stop the local proxy
+    // after a prolonged drop instead of leaving it up (and refusing/hanging
+    // new connections) indefinitely.
     private final Runnable healthChecker = new Runnable() {
         @Override public void run() {
             if (running && !Mobile.pendingCaptchaURL().isEmpty() && awaitingCaptcha.compareAndSet(false, true)) {
@@ -95,12 +110,28 @@ public final class OpenFluxProxyService extends Service {
             }
             if (running) {
                 boolean connected = Mobile.proxyIsConnected();
-                if (!connected && "Подключено".equals(status)) {
-                    status = "Подключение…";
-                    lastError = "Транспорт отключился, переподключение…";
-                } else if (connected && "Подключение…".equals(status)) {
-                    status = "Подключено";
-                    lastError = "Транспорт восстановлен";
+                if (!connected) {
+                    long now = SystemClock.elapsedRealtime();
+                    if (disconnectedSinceMs == 0L) disconnectedSinceMs = now;
+                    boolean killSwitch = getSharedPreferences(MainActivity.SETTINGS_PREFS_NAME, MODE_PRIVATE)
+                            .getBoolean("kill_switch", true);
+                    if (!killSwitch && now - disconnectedSinceMs >= KILL_SWITCH_GRACE_MS) {
+                        lastError = "Не удалось переподключиться - прокси остановлен, Kill Switch выключен";
+                        stopProxy();
+                        return;
+                    }
+                    if ("Подключено".equals(status)) {
+                        status = "Подключение…";
+                    }
+                    lastError = killSwitch
+                            ? "Kill Switch: новые соединения блокируются, переподключение…"
+                            : "Транспорт отключился, переподключение…";
+                } else {
+                    disconnectedSinceMs = 0L;
+                    if ("Подключение…".equals(status)) {
+                        status = "Подключено";
+                        lastError = "Транспорт восстановлен";
+                    }
                 }
             }
             notificationHandler.postDelayed(this, 2000);
@@ -112,6 +143,8 @@ public final class OpenFluxProxyService extends Service {
     public static String getLastError() { return lastError; }
     public static int getActivePort() { return activePort; }
     public static long getConnectedAtMillis() { return connectedAtMillis; }
+    public static long getSentPerSec() { return sentPerSec; }
+    public static long getReceivedPerSec() { return receivedPerSec; }
 
     private static String formatSpeed(long bytesPerSecond) {
         if (bytesPerSecond < 1024) return bytesPerSecond + " Б/с";
@@ -123,6 +156,7 @@ public final class OpenFluxProxyService extends Service {
         lastSampledSent = 0;
         lastSampledReceived = 0;
         lastSampledAt = SystemClock.elapsedRealtime();
+        disconnectedSinceMs = 0L;
         notificationHandler.removeCallbacks(speedUpdater);
         notificationHandler.post(speedUpdater);
         notificationHandler.removeCallbacks(healthChecker);
@@ -132,6 +166,8 @@ public final class OpenFluxProxyService extends Service {
     private void stopSpeedUpdates() {
         notificationHandler.removeCallbacks(speedUpdater);
         notificationHandler.removeCallbacks(healthChecker);
+        sentPerSec = 0;
+        receivedPerSec = 0;
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -200,12 +236,22 @@ public final class OpenFluxProxyService extends Service {
         return START_STICKY;
     }
 
+    // Newline-joined domain list for the enabled "Маршрутизация" presets +
+    // custom domains, passed to the bridge's split dialer. Read fresh on
+    // every start so a settings change takes effect on the next connect.
+    private String resolveBypassDomains() {
+        SharedPreferences prefs = getSharedPreferences(DomainFilter.PREFS_NAME, MODE_PRIVATE);
+        Set<String> presets = DomainFilter.loadEnabledPresets(prefs);
+        Set<String> custom = DomainFilter.loadCustomDomains(prefs);
+        return String.join("\n", DomainFilter.resolveDomains(this, presets, custom));
+    }
+
     private String startCarrier(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid,
-            String listen, String username, String password) {
+            String listen, String username, String password, String bypassDomains) {
         String specs = sessionTransports;
         return specs.isEmpty()
-                ? Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password)
-                : Mobile.startSessionProxy(specs, encryptionSecret, listen, username, password);
+                ? Mobile.startProxy(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password, bypassDomains)
+                : Mobile.startSessionProxy(specs, encryptionSecret, listen, username, password, bypassDomains);
     }
 
     private void startProxyTransport(String transportType, String url, String encryptionSecret, String codec, String maxToken, String maxUid, String bindHost, int port,
@@ -213,11 +259,12 @@ public final class OpenFluxProxyService extends Service {
         if (!isCurrent(session)) return;
         CaptchaActivity.initCookieStore(this);
         String listen = bindHost + ":" + port;
-        String error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
+        String bypass = resolveBypassDomains();
+        String error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password, bypass);
         // Some transports (Volga) fail Start outright on a captcha; retry
         // with the solved cookies, which the next Start replays.
         while (error != null && !error.isEmpty() && awaitCaptcha(session)) {
-            error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password);
+            error = startCarrier(transportType, url, encryptionSecret, codec, maxToken, maxUid, listen, username, password, bypass);
         }
         if (error != null && !error.isEmpty()) {
             fail(session, error);
