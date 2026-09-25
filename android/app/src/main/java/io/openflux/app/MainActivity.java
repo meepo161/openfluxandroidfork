@@ -1454,24 +1454,19 @@ public final class MainActivity extends Activity {
         scroll.setPadding(0, 0, 0, navClearance());
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setBackground(rounded(surface, border, 1, 12));
         list.addView(settingsListRow(R.drawable.ic_swap, "Режим работы",
                 modeLabel(connectionMode), SETTINGS_MODE));
-        addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_public, "Сеть",
                 "DNS-сервер и MTU", SETTINGS_NETWORK));
-        addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_apps, "Приложения",
                 "Какие приложения используют туннель", SETTINGS_APPS));
-        addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_public, "Маршрутизация",
                 "Сайты и сервисы в обход туннеля", SETTINGS_ROUTING));
-        addDivider(list);
         list.addView(settingsListRow(R.drawable.ic_dark_mode, "Вид",
-                "Тема и автопрокрутка логов", SETTINGS_INTERFACE));
-        addDivider(list);
+                "Тема, логи и анимации", SETTINGS_INTERFACE));
         list.addView(settingsListRow(R.drawable.ic_info, "О проекте",
                 "Репозитории проекта", SETTINGS_ABOUT));
+        groupTiles(list);
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
         return scroll;
     }
@@ -1491,11 +1486,10 @@ public final class MainActivity extends Activity {
     private View settingsListRow(int iconRes, String titleValue, String detailValue, int tab) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(14), dp(14), dp(14));
-        row.setBackground(ripple(Color.TRANSPARENT, 0));
+        row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setClickable(true);
         row.setFocusable(true);
-        row.addView(icon(iconRes, accent), new LinearLayout.LayoutParams(dp(24), dp(24)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -2806,6 +2800,107 @@ public final class MainActivity extends Activity {
                 shape, null);
     }
 
+    private float[] radii(int radius) {
+        float r = dp(radius);
+        return new float[]{r, r, r, r, r, r, r, r};
+    }
+
+    // Icon on a tonal circle, as in the Android 15-16 settings lists.
+    private View iconBubble(int iconRes) {
+        FrameLayout bubble = new FrameLayout(this);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(tonal(0.2f));
+        bubble.setBackground(circle);
+        bubble.addView(icon(iconRes, accent), new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
+        return bubble;
+    }
+
+    // Stacks the children of list as one group: 2dp gaps, large outer
+    // corners, small inner ones, each tile with its own ripple.
+    private void groupTiles(LinearLayout list) {
+        int n = list.getChildCount();
+        for (int i = 0; i < n; i++) {
+            float top = dp(i == 0 ? 24 : 6), bottom = dp(i == n - 1 ? 24 : 6);
+            View child = list.getChildAt(i);
+            child.setBackground(tile(surface, border,
+                    new float[]{top, top, top, top, bottom, bottom, bottom, bottom}));
+            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) child.getLayoutParams();
+            params.topMargin = i == 0 ? 0 : dp(2);
+            child.setLayoutParams(params);
+        }
+    }
+
+    // Material 3 switch: a 56x32 pill track; off, an outlined track with a
+    // small thumb; on, a filled track with a large thumb carrying a check.
+    private void styleSwitch(Switch toggle) {
+        int off = darkMode ? Color.rgb(140, 147, 160) : Color.rgb(116, 119, 127);
+        GradientDrawable trackOn = new GradientDrawable();
+        trackOn.setCornerRadius(dp(16));
+        trackOn.setColor(accent);
+        trackOn.setSize(dp(56), dp(32));
+        GradientDrawable trackOff = new GradientDrawable();
+        trackOff.setCornerRadius(dp(16));
+        trackOff.setColor(background);
+        trackOff.setStroke(dp(2), off);
+        trackOff.setSize(dp(56), dp(32));
+        android.graphics.drawable.StateListDrawable track = new android.graphics.drawable.StateListDrawable();
+        track.addState(new int[]{android.R.attr.state_checked}, trackOn);
+        track.addState(new int[]{}, trackOff);
+        track.setEnterFadeDuration(150);
+        track.setExitFadeDuration(150);
+
+        // Both thumbs are 28x32 (the track is twice as wide), so the track
+        // keeps its shape while the visible circle grows.
+        android.graphics.drawable.Drawable thumbOn = switchThumb(dp(12), Color.WHITE, accent);
+        android.graphics.drawable.Drawable thumbOff = switchThumb(dp(8), off, 0);
+        android.graphics.drawable.StateListDrawable thumb = new android.graphics.drawable.StateListDrawable();
+        thumb.addState(new int[]{android.R.attr.state_checked}, thumbOn);
+        thumb.addState(new int[]{}, thumbOff);
+        thumb.setEnterFadeDuration(150);
+        thumb.setExitFadeDuration(150);
+
+        toggle.setTrackDrawable(track);
+        toggle.setThumbDrawable(thumb);
+        toggle.setTrackTintList(null);
+        toggle.setThumbTintList(null);
+        toggle.setSwitchMinWidth(dp(56));
+        toggle.setShowText(false);
+        toggle.setBackground(null);
+    }
+
+    // A switch thumb: a circle of the given radius centered in 28x32, with
+    // a check drawn in checkColor when that is not 0.
+    private android.graphics.drawable.Drawable switchThumb(float radius, int fill, int checkColor) {
+        return new android.graphics.drawable.Drawable() {
+            private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            private final android.graphics.Path path = new android.graphics.Path();
+            @Override public void draw(android.graphics.Canvas canvas) {
+                float cx = getBounds().exactCenterX(), cy = getBounds().exactCenterY();
+                paint.setStyle(android.graphics.Paint.Style.FILL);
+                paint.setColor(fill);
+                canvas.drawCircle(cx, cy, radius, paint);
+                if (checkColor == 0) return;
+                float u = radius / 12f;
+                path.reset();
+                path.moveTo(cx - 5 * u, cy);
+                path.lineTo(cx - 1.5f * u, cy + 3.5f * u);
+                path.lineTo(cx + 5.5f * u, cy - 3.5f * u);
+                paint.setStyle(android.graphics.Paint.Style.STROKE);
+                paint.setStrokeWidth(2.2f * u);
+                paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                paint.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+                paint.setColor(checkColor);
+                canvas.drawPath(path, paint);
+            }
+            @Override public int getIntrinsicWidth() { return dp(28); }
+            @Override public int getIntrinsicHeight() { return dp(32); }
+            @Override public void setAlpha(int alpha) { paint.setAlpha(alpha); }
+            @Override public void setColorFilter(android.graphics.ColorFilter filter) { }
+            @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+        };
+    }
+
     private ImageView choiceCheck() {
         ImageView check = icon(R.drawable.ic_check, Color.WHITE);
         GradientDrawable dot = new GradientDrawable();
@@ -3134,10 +3229,9 @@ public final class MainActivity extends Activity {
     private LinearLayout cardRow(int iconRes, String titleValue, String detailValue) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(14), dp(16), dp(14));
-        row.setBackground(rounded(surface, border, 1, 11));
-        ImageView icon = icon(iconRes, accent);
-        row.addView(icon, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        row.setPadding(dp(14), dp(14), dp(16), dp(14));
+        row.setBackground(tile(surface, border, radii(20)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -3151,9 +3245,9 @@ public final class MainActivity extends Activity {
     private View settingRow(int iconRes, String labelValue, EditText input) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(7), dp(10), dp(7));
-        row.setBackground(rounded(surface, border, 1, 10));
-        row.addView(icon(iconRes, secondary), new LinearLayout.LayoutParams(dp(24), dp(24)));
+        row.setPadding(dp(14), dp(10), dp(10), dp(10));
+        row.setBackground(tile(surface, border, radii(20)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         TextView title = text(labelValue, 14, text, false);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
         titleParams.leftMargin = dp(12);
@@ -3165,9 +3259,9 @@ public final class MainActivity extends Activity {
     private Switch settingSwitch(int iconRes, String titleValue, String detailValue, boolean checked) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(10), dp(10), dp(10));
-        row.setBackground(rounded(surface, border, 1, 10));
-        row.addView(icon(iconRes, secondary), new LinearLayout.LayoutParams(dp(24), dp(24)));
+        row.setPadding(dp(14), dp(14), dp(14), dp(14));
+        row.setBackground(tile(surface, border, radii(20)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -3176,6 +3270,7 @@ public final class MainActivity extends Activity {
         copy.addView(text(detailValue, 11, secondary, false));
         row.addView(copy, copyParams);
         Switch toggle = new Switch(this);
+        styleSwitch(toggle);
         toggle.setChecked(checked);
         toggle.setContentDescription(titleValue);
         row.addView(toggle, new LinearLayout.LayoutParams(-2, dp(42)));
