@@ -230,12 +230,13 @@ func NodeVerify(specsJSON, secret, expectHost string, timeoutSec int) string {
 	if err != nil {
 		return failure(err, nil)
 	}
+	// Same order as StopProxy: the captcha side first, then the carriers.
 	defer func() {
-		_ = trans.Stop()
 		detachCaptcha()
 		CancelCaptcha()
 		setAuthProxy(nil)
 		clearRoute()
+		_ = trans.Stop()
 	}()
 	if err := trans.Start(); err != nil {
 		return failure(err, nil)
@@ -297,6 +298,7 @@ func packetRunning() bool {
 
 func fetchIP(ctx context.Context, trans transport.Transport) (string, error) {
 	tun := tunnel.NewTCPTunnel(trans, false)
+	defer tun.Close()
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {

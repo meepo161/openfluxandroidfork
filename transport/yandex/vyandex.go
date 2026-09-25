@@ -498,6 +498,14 @@ type relayClient struct {
 
 	mu       sync.Mutex
 	frontier string
+
+	// stopMu orders Send against Stop: Stop closes the queues, and a send
+	// on a closed channel panics even inside a select with a default.
+	// Manager.Stop stops every transport again after Session.Stop did, so
+	// Stop must also be safe to call twice.
+	stopMu   sync.RWMutex
+	stopped  bool
+	stopOnce sync.Once
 }
 
 func newRelayClient(auth *volgaAuth, cfg VolgaConfig, stats *VolgaStats) *relayClient {
@@ -538,9 +546,14 @@ func (r *relayClient) Start() {
 }
 
 func (r *relayClient) Stop() {
-	r.cancel()
-	close(r.queue)
-	close(r.batchQueue)
+	r.stopOnce.Do(func() {
+		r.cancel()
+		r.stopMu.Lock()
+		r.stopped = true
+		close(r.queue)
+		close(r.batchQueue)
+		r.stopMu.Unlock()
+	})
 	r.wg.Wait()
 }
 
@@ -555,6 +568,11 @@ func (r *relayClient) Send(data []byte) error {
 	cp := make([]byte, len(data))
 	copy(cp, data)
 
+	r.stopMu.RLock()
+	defer r.stopMu.RUnlock()
+	if r.stopped {
+		return fmt.Errorf("transport stopped")
+	}
 	select {
 	case r.batchQueue <- cp:
 		return nil
