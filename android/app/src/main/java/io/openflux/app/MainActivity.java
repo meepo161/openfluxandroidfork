@@ -502,7 +502,6 @@ public final class MainActivity extends Activity {
         root.addView(navDeadZone, navDeadZoneLayoutParams());
         root.addView(buildBottomNav(), navLayoutParams());
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            body.setPadding(side, top + insets.getSystemWindowInsetTop(), side, 0);
             int bottom = insets.getSystemWindowInsetBottom();
             // The first call happens before any keyboard can be open, so that
             // bottom inset is purely the gesture-nav bar - remember it as the
@@ -513,6 +512,13 @@ public final class MainActivity extends Activity {
             if (gestureInset < 0) gestureInset = bottom;
             boolean keyboardOpen = bottom > gestureInset + dp(50);
             navBottomInset = gestureInset;
+            // Edge-to-edge (targetSdk 35) means the window is not resized for
+            // the keyboard: lift the page ourselves. Pages already keep
+            // navClearance() free at the bottom for the (now hidden) pill, so
+            // only the rest of the keyboard height is added. The shrinking
+            // ScrollView then brings the focused field back into view.
+            int lift = keyboardOpen ? Math.max(0, bottom - navClearance()) : 0;
+            body.setPadding(side, top + insets.getSystemWindowInsetTop(), side, lift);
             View nav = root.getChildAt(root.getChildCount() - 1);
             navScrim.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
             navDeadZone.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
