@@ -78,6 +78,9 @@ public final class NodeWizardActivity extends Activity {
     private String channelId, channelKey, documentUrl;
     private EditText nameInput, docInput;
     private String docWarning = "";
+    // The Yandex sign-in from YandexDocActivity (a Cookie header), handed to
+    // the node at install and then dropped. Never saved.
+    private String yandexCookies = "";
     // Step 3: plan.
     private JSONObject plan;
     private EditText sudoInput;
@@ -355,7 +358,8 @@ public final class NodeWizardActivity extends Activity {
     // ---- step 3: plan ---------------------------------------------------------
 
     private void showPlanStep() {
-        run("Спрашиваю сервер, что изменится…", () -> Mobile.nodePlan(channelId, 0), r -> {
+        boolean withCookies = !yandexCookies.isEmpty();
+        run("Спрашиваю сервер, что изменится…", () -> Mobile.nodePlan(channelId, 0, withCookies), r -> {
             if (!r.optBoolean("ok")) {
                 setStatus(r.optString("error"), true);
                 return;
@@ -383,6 +387,11 @@ public final class NodeWizardActivity extends Activity {
                 ? "Каналы, которые уже есть на сервере, не изменятся: " + join(untouched) + ". "
                 : "";
         content.addView(note(keep + "Остальные программы на сервере (Docker, VPN, панели) мастер не трогает."));
+        if (!yandexCookies.isEmpty()) {
+            content.addView(note("Нода будет открывать документ под вашим аккаунтом Яндекса: так Яндекс не требует "
+                    + "от сервера капчу. Кто получит root на сервере, получит и доступ к этому аккаунту, поэтому "
+                    + "лучше входить отдельным аккаунтом для документов."));
+        }
         if (!docWarning.isEmpty()) content.addView(note(docWarning));
         if ("password".equals(probe.optString("sudo"))) {
             sudoInput = field("Пароль sudo", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
@@ -401,12 +410,13 @@ public final class NodeWizardActivity extends Activity {
         String sudo = sudoInput != null ? sudoInput.getText().toString() : "";
         int port = plan.optInt("port");
         run("Устанавливаю ноду: скачиваю ядро, пишу конфигурацию, запускаю…",
-                () -> Mobile.nodeApply(channelId, documentUrl, channelKey, port, sudo), r -> {
+                () -> Mobile.nodeApply(channelId, documentUrl, channelKey, port, sudo, yandexCookies), r -> {
                     if (!r.optBoolean("ok")) {
                         setStatus(r.optBoolean("sudo") ? "sudo не принял пароль" : r.optString("error"), true);
                         return;
                     }
                     installed = true;
+                    yandexCookies = "";
                     try {
                         shareLink = Mobile.nodeShareLink(nameInput.getText().toString().trim(), documentUrl,
                                 channelKey, hostInput.getText().toString().trim(), port);
@@ -581,6 +591,8 @@ public final class NodeWizardActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_DOC) {
             if (resultCode == RESULT_OK && data != null) {
+                String cookies = data.getStringExtra(YandexDocActivity.EXTRA_COOKIES);
+                yandexCookies = cookies != null && Mobile.nodeSignedIn(cookies) ? cookies : "";
                 checkDocument(data.getStringExtra(YandexDocActivity.EXTRA_URL));
             } else {
                 setStatus("Документ не создан. Можно вставить ссылку вручную.", true);

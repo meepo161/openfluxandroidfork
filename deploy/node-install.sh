@@ -21,7 +21,12 @@
 #        node-install.sh apply|remove CONFIG_FILE (run as root)
 #        node-install.sh upgrade                  (run as root: move every
 #                                                 channel to this core)
-# The config is "key=value" lines: channel, url, key, port. apply and remove
+#        node-install.sh set-cookies CONFIG_FILE  (run as root: replace a
+#                                                 channel's Yandex login)
+# The config is "key=value" lines: channel, url, key, port, and optionally
+# cookies: the channel's Yandex sign-in as the core's cookie store JSON,
+# base64-encoded. It goes to /var/lib/openflux-node/<channel>/cookies.json
+# (0600, owned by the node user) and is never printed. apply and remove
 # take it from a 0600 temp file, which they delete after reading, so that
 # stdin stays free for `sudo -S` (a wrong sudo password would otherwise make
 # sudo read the config as further password attempts). Secrets never appear
@@ -31,11 +36,11 @@
 set -u
 umask 077
 
-CORE_VERSION="node-v1.2.1"
+CORE_VERSION="node-v1.2.2"
 CORE_BASE="https://github.com/meepo161/openfluxandroidfork/releases/download/$CORE_VERSION"
-SHA_amd64="e6df515f76f7e11d357b335043e9f7881dad1c628e56a008a819546a81772265"
-SHA_arm64="24e4b594f8a6293c5d6887a7b3200d9e40f3bbb84f829b12f2128e1770a75913"
-SHA_arm="f900784b045edfaa8548be7ed0deeabaea3435599ec899a1316261bcf9547fa6"
+SHA_amd64="e2f3d840d2a439eef9759d453faa52d002e9c234f939ba7441a19b1f5b41cc01"
+SHA_arm64="635bbe65b640e982ff030e4ee768fdc1f5f5476629cfb36389bcdb47d33fb0fc"
+SHA_arm="dfd8dad77162567d54e27d5fc13317b4cdc6bd3ec67d91b6d7abb7f99997e94a"
 
 BIN_DIR="/opt/openflux-node/bin"
 CONF_ROOT="/etc/openflux-node"
@@ -157,7 +162,7 @@ pick_port() {
 
 # ---- input ------------------------------------------------------------------
 
-CHANNEL=""; URL=""; KEY=""; PORT=""
+CHANNEL=""; URL=""; KEY=""; PORT=""; COOKIES=""
 
 # read_config [FILE]: reads stdin, or FILE and then deletes it.
 read_config() {
@@ -173,6 +178,7 @@ read_config() {
             url=*) URL=${line#url=} ;;
             key=*) KEY=${line#key=} ;;
             port=*) PORT=${line#port=} ;;
+            cookies=*) COOKIES=${line#cookies=} ;;
             "") ;;
             *) fail input "неизвестная строка конфигурации" ;;
         esac
@@ -186,6 +192,26 @@ valid_url() {
 }
 valid_port() {
     printf '%s' "$1" | grep -Eq '^[0-9]{4,5}$' && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
+}
+
+# write_cookies: decodes COOKIES into the channel's cookie store, which the
+# node loads at start. Needs the node user to exist.
+write_cookies() {
+    printf '%s' "$COOKIES" | grep -Eq '^[A-Za-z0-9+/]+={0,2}$' || return 1
+    [ ${#COOKIES} -le 65536 ] || return 1
+    dir="$STATE_ROOT/$CHANNEL"
+    # umask 077 would make the parent 0700 and lock the node user out of
+    # its own state directory (systemd only creates it when missing).
+    mkdir -p "$STATE_ROOT" && chmod 0755 "$STATE_ROOT" || return 1
+    mkdir -p "$dir" || return 1
+    tmp="$dir/.cookies.json.new"
+    if have base64; then
+        printf '%s' "$COOKIES" | base64 -d > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    else
+        printf '%s' "$COOKIES" | openssl base64 -d -A > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    fi
+    head -c 1 "$tmp" | grep -q '{' || { rm -f "$tmp"; return 1; }
+    chown "$NODE_USER:$NODE_USER" "$dir" "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$dir/cookies.json"
 }
 
 check_channel() {
@@ -235,6 +261,7 @@ cmd_plan() {
         set -- "$@" "Скачать ядро OpenFlux $CORE_VERSION (linux-$arch) с GitHub и сверить SHA-256 в $BIN_DIR"
     fi
     set -- "$@" "Создать $CONF_ROOT/$CHANNEL: node.conf и ключ шифрования канала (права 0640)"
+    [ -n "$COOKIES" ] && set -- "$@" "Сохранить вход в Яндекс для этого канала в $STATE_ROOT/$CHANNEL/cookies.json (права 0600, только для ноды)"
     [ -f "$UNIT_FILE" ] || set -- "$@" "Установить шаблон systemd $UNIT_FILE"
     set -- "$@" "Запустить openflux-node@$CHANNEL: Яндекс Документ (основной) и direct на порту $PORT/tcp (резерв)"
     case "$(firewall_kind)" in
@@ -332,6 +359,7 @@ cmd_apply() {
     valid_key "$KEY" || fail input "ключ канала должен быть 64 hex-символа"
     valid_url "$URL" || fail input "адрес документа должен быть вида https://docs.yandex.ru/edit/d/..."
     valid_port "$PORT" || fail input "не указан порт из плана"
+    [ -z "$COOKIES" ] || printf '%s' "$COOKIES" | grep -Eq '^[A-Za-z0-9+/]+={0,2}$'         || fail input "cookies должны быть в base64"
     arch=$(detect_arch)
     [ -n "$arch" ] || fail apply "архитектура $(uname -m) не поддерживается"
     [ -d "$CONF_ROOT/$CHANNEL" ] && fail apply "канал $CHANNEL уже существует на сервере"
@@ -385,6 +413,9 @@ EOF
     chmod 0751 "$dir"
     chmod 0640 "$dir/encryption-key" "$dir/node.conf"
     chmod 0644 "$dir/port"
+    if [ -n "$COOKIES" ]; then
+        write_cookies || apply_fail cookies "не удалось сохранить вход в Яндекс на сервере"
+    fi
 
     if [ ! -f "$UNIT_FILE" ]; then
         write_unit
@@ -463,6 +494,19 @@ cmd_upgrade() {
 ' "$CORE_VERSION" "$(json_list "$@")"
 }
 
+# set-cookies: replaces a channel's Yandex sign-in and restarts it.
+cmd_set_cookies() {
+    [ "$(id -u)" = 0 ] || fail set-cookies "нужны права root (sudo)"
+    read_config "$@"
+    check_channel
+    [ -d "$CONF_ROOT/$CHANNEL" ] || fail set-cookies "канала $CHANNEL нет на сервере"
+    [ -n "$COOKIES" ] || fail set-cookies "нет cookies"
+    write_cookies || fail set-cookies "не удалось сохранить вход в Яндекс на сервере"
+    systemctl restart "openflux-node@$CHANNEL" || fail set-cookies "не удалось перезапустить openflux-node@$CHANNEL"
+    printf '{"ok":true,"channel":"%s"}
+' "$CHANNEL"
+}
+
 cmd_status() {
     read_config
     check_channel
@@ -478,5 +522,6 @@ case "${1:-}" in
     remove) shift; cmd_remove "$@" ;;
     status) cmd_status ;;
     upgrade) cmd_upgrade ;;
-    *) fail usage "usage: node-install.sh probe|plan|apply|remove|status|upgrade" ;;
+    set-cookies) shift; cmd_set_cookies "$@" ;;
+    *) fail usage "usage: node-install.sh probe|plan|apply|remove|status|upgrade|set-cookies" ;;
 esac

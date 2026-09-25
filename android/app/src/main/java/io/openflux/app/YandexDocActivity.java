@@ -26,12 +26,16 @@ import java.util.regex.Pattern;
 // edit access for anyone with the link, which both the node and the client
 // need. It drives the same internal endpoints the Disk web client calls
 // (there is no public API for edit-by-link on personal accounts), from the
-// Disk page itself, so the session never leaves the WebView. On the way
-// out every cookie is wiped: the login must not reach CaptchaActivity, which
-// hands its cookies to the transport and, for a node's check, to the VDS.
+// Disk page itself. On success the Yandex cookies for the document go back
+// to the wizard (only in memory), which hands them to the node over SSH so
+// it opens the document signed in. On the way out every cookie is wiped:
+// the login must not stay in the WebView, where CaptchaActivity would pass
+// it along with a captcha's cookies.
 public final class YandexDocActivity extends Activity {
     static final String EXTRA_FILENAME = "filename";
     static final String EXTRA_URL = "url";
+    // The Cookie header the WebView holds for the document: the sign-in.
+    static final String EXTRA_COOKIES = "cookies";
 
     private static final String START_URL = "https://disk.yandex.ru/client/disk";
     // Desktop UA: the Disk web client (and the page data the script reads)
@@ -204,6 +208,7 @@ public final class YandexDocActivity extends Activity {
     private void close(String url) {
         if (finished) return;
         finished = true;
+        String cookies = url != null ? CookieManager.getInstance().getCookie(url) : null;
         CookieManager.getInstance().removeAllCookies(null);
         CookieManager.getInstance().flush();
         WebStorage.getInstance().deleteAllData();
@@ -211,7 +216,10 @@ public final class YandexDocActivity extends Activity {
             web.clearCache(true);
             web.clearHistory();
         }
-        if (url != null) setResult(RESULT_OK, new Intent().putExtra(EXTRA_URL, url));
+        if (url != null) {
+            setResult(RESULT_OK, new Intent().putExtra(EXTRA_URL, url)
+                    .putExtra(EXTRA_COOKIES, cookies != null ? cookies : ""));
+        }
         else setResult(RESULT_CANCELED);
         finish();
     }

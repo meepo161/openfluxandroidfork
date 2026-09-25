@@ -104,13 +104,17 @@ func TestInstallOnVDS(t *testing.T) {
 		t.Fatalf("deploy probe: %+v %v", p, err)
 	}
 	id, _ := NewChannelID()
-	plan, err := c.Plan(id, 0)
+	plan, err := c.Plan(id, 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("plan: %+v", plan)
 	key, _ := NewKey()
-	ch := Channel{ID: id, URL: os.Getenv("OPENFLUX_TEST_DOC"), Key: key, Port: plan.Port}
+	cookies, signedIn, err := CookieStore(os.Getenv("OPENFLUX_TEST_DOC"), "Session_id=test-login-value; spravka=pass")
+	if err != nil || !signedIn {
+		t.Fatalf("CookieStore: %v %v", signedIn, err)
+	}
+	ch := Channel{ID: id, URL: os.Getenv("OPENFLUX_TEST_DOC"), Key: key, Port: plan.Port, Cookies: cookies}
 
 	if err := c.Apply(ch, "wrong-password"); !errors.Is(err, ErrSudoPassword) {
 		t.Fatalf("wrong sudo password: got %v", err)
@@ -133,14 +137,30 @@ func TestInstallOnVDS(t *testing.T) {
 	if out, _, _ := c.run("ps -eo args", nil); strings.Contains(string(out), key) {
 		t.Fatal("channel key visible in the process list")
 	}
-	if _, err := c.Plan(id, 0); err == nil {
+	if out, _, _ := c.run("stat -c '%a %U' /var/lib/openflux-node/"+id+"/cookies.json", nil); strings.TrimSpace(string(out)) != "600 openflux-node" {
+		t.Fatalf("cookies.json: %q", out)
+	}
+	if out, _, _ := c.run("sudo -S -p '' cat /var/lib/openflux-node/"+id+"/cookies.json", []byte(userPass+"\n")); !strings.Contains(string(out), "test-login-value") {
+		t.Fatalf("cookies.json content: %q", out)
+	}
+	if out, _, _ := c.run("ps -eo args; sudo -S -p '' journalctl -u openflux-node@"+id+" --no-pager", []byte(userPass+"\n")); strings.Contains(string(out), "test-login-value") {
+		t.Fatal("the Yandex login leaked into ps or the node's log")
+	}
+	fresh, _, _ := CookieStore(os.Getenv("OPENFLUX_TEST_DOC"), "Session_id=renewed-login")
+	if err := c.SetCookies(id, fresh, userPass); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := c.run("sudo -S -p '' cat /var/lib/openflux-node/"+id+"/cookies.json", []byte(userPass+"\n")); !strings.Contains(string(out), "renewed-login") {
+		t.Fatalf("set-cookies did not replace the login: %q", out)
+	}
+	if _, err := c.Plan(id, 0, true); err == nil {
 		t.Fatal("planning an existing channel must fail")
 	}
-	again, err := c.Plan("other", plan.Port)
+	again, err := c.Plan("other", plan.Port, false)
 	if err == nil {
 		t.Fatalf("the channel's port must count as taken: %+v", again)
 	}
-	next, err := c.Plan("other", 0)
+	next, err := c.Plan("other", 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
