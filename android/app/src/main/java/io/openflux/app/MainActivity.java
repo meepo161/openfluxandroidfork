@@ -1034,8 +1034,7 @@ public final class MainActivity extends Activity {
             row.setPadding(dp(12), dp(10), dp(12), dp(10));
             row.setBackground(ripple(Color.TRANSPARENT, 8));
             row.setClickable(true);
-            row.addView(icon(profileIconRes(p.icon), selected ? accent : secondary),
-                    new LinearLayout.LayoutParams(dp(22), dp(22)));
+            row.addView(iconBubble(profileIconRes(p.icon)), new LinearLayout.LayoutParams(dp(34), dp(34)));
             TextView nameView = text(p.name, 14, text, selected);
             LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
             nameParams.leftMargin = dp(12);
@@ -1067,8 +1066,8 @@ public final class MainActivity extends Activity {
         row.setBackground(rounded(surface, border, 1, 11));
         row.setClickable(true);
         row.setFocusable(true);
-        row.addView(icon(p != null ? profileIconRes(p.icon) : R.drawable.ic_public, accent),
-                new LinearLayout.LayoutParams(dp(26), dp(26)));
+        row.addView(iconBubble(p != null ? profileIconRes(p.icon) : R.drawable.ic_public),
+                new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -1501,7 +1500,7 @@ public final class MainActivity extends Activity {
         row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setClickable(true);
         row.setFocusable(true);
-        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -1931,7 +1930,7 @@ public final class MainActivity extends Activity {
                 "damnurmum/OpenFlux-Android", FORK_REPO_URL), matchWrap());
         links.addView(aboutLinkRow(R.drawable.ic_telegram, "Telegram чат",
                 "@openflux_chat", "https://t.me/openflux_chat"), matchWrap());
-        links.addView(aboutLinkRow(R.drawable.ic_brand_discord, "Discord",
+        links.addView(aboutLinkRow(R.drawable.ic_discord, "Discord",
                 "discord.gg/openfluxx", "https://discord.gg/8a4S3QAh62"), matchWrap());
         groupTiles(links);
         LinearLayout.LayoutParams linksParams = matchWrap();
@@ -2051,8 +2050,7 @@ public final class MainActivity extends Activity {
         row.setBackground(ripple(Color.TRANSPARENT, 0));
         row.setClickable(true);
         row.setFocusable(true);
-        row.addView(icon(profileIconRes(p.icon), selected ? accent : secondary),
-                new LinearLayout.LayoutParams(dp(24), dp(24)));
+        row.addView(iconBubble(profileIconRes(p.icon)), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -2669,9 +2667,9 @@ public final class MainActivity extends Activity {
     private static int presetIcon(String id) {
         switch (id) {
             case "ru": return R.drawable.ic_gerb;
-            case "youtube": return R.drawable.ic_brand_youtube;
-            case "discord": return R.drawable.ic_brand_discord;
-            case "ai": return R.drawable.ic_brand_openai;
+            case "youtube": return R.drawable.ic_youtube;
+            case "discord": return R.drawable.ic_discord;
+            case "ai": return R.drawable.ic_openai;
             default: return R.drawable.ic_public;
         }
     }
@@ -2845,25 +2843,6 @@ public final class MainActivity extends Activity {
         return new float[]{r, r, r, r, r, r, r, r};
     }
 
-    // A brand logo (resources named ic_brand_*) on a neutral circle in its
-    // own colors, anything else on a tonal circle tinted with the accent.
-    private View leadingIcon(int iconRes) {
-        String name = getResources().getResourceEntryName(iconRes);
-        if (!name.startsWith("ic_brand_")) return iconBubble(iconRes);
-        FrameLayout bubble = new FrameLayout(this);
-        GradientDrawable circle = new GradientDrawable();
-        circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(darkMode ? Color.rgb(36, 41, 54) : Color.rgb(240, 242, 246));
-        bubble.setBackground(circle);
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(iconRes);
-        // OpenAI's mark is monochrome: it follows the text color.
-        if (name.equals("ic_brand_openai")) logo.setImageTintList(ColorStateList.valueOf(text));
-        int size = dp(24);
-        bubble.addView(logo, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-        return bubble;
-    }
-
     // Icon on a tonal circle, as in the Android 15-16 settings lists.
     private View iconBubble(int iconRes) {
         FrameLayout bubble = new FrameLayout(this);
@@ -3011,7 +2990,7 @@ public final class MainActivity extends Activity {
             if (icons != null && icons[i] != 0) {
                 LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
                 iconParams.rightMargin = dp(14);
-                row.addView(leadingIcon(icons[i]), iconParams);
+                row.addView(iconBubble(icons[i]), iconParams);
                 row.setPadding(dp(14), dp(12), dp(16), dp(12));
             }
             LinearLayout copy = new LinearLayout(this);
@@ -3297,7 +3276,7 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(14), dp(16), dp(14));
         row.setBackground(tile(surface, border, radii(20)));
-        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -3313,7 +3292,7 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(10), dp(10), dp(10));
         row.setBackground(tile(surface, border, radii(20)));
-        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         TextView title = text(labelValue, 14, text, false);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
         titleParams.leftMargin = dp(12);
@@ -3327,7 +3306,7 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setBackground(tile(surface, border, radii(20)));
-        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
