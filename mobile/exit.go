@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"openflux/share"
 	"openflux/transport"
 	"openflux/tunnel"
 	"openflux/utils"
@@ -18,6 +19,8 @@ var exitNode = struct {
 	running   bool
 	transport transport.Transport
 	node      tunnel.ExitNode
+	// share is what ExitShareLink hands to clients; nil when not running.
+	share *share.Config
 }{}
 
 // StartExit starts the exit node in classic single-transport mode; the
@@ -28,7 +31,7 @@ func StartExit(transportType, documentURL, encryptionSecret, codec, maxToken, ma
 	}
 	return startExitWith(func() (transport.Transport, error) {
 		return classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid, true)
-	})
+	}, exitShareClassic(transportType, documentURL, encryptionSecret, codec))
 }
 
 // StartSessionExit starts the exit node in Session mode (see StartSession).
@@ -36,10 +39,10 @@ func StartExit(transportType, documentURL, encryptionSecret, codec, maxToken, ma
 func StartSessionExit(specsJSON, encryptionSecret string) string {
 	return startExitWith(func() (transport.Transport, error) {
 		return buildSession(specsJSON, encryptionSecret, true)
-	})
+	}, exitShareSession(specsJSON, encryptionSecret))
 }
 
-func startExitWith(build func() (transport.Transport, error)) string {
+func startExitWith(build func() (transport.Transport, error), shareCfg *share.Config) string {
 	exitNode.mu.Lock()
 	if exitNode.running {
 		exitNode.mu.Unlock()
@@ -74,7 +77,7 @@ func startExitWith(build func() (transport.Transport, error)) string {
 	}
 
 	exitNode.mu.Lock()
-	exitNode.running, exitNode.transport, exitNode.node = true, trans, node
+	exitNode.running, exitNode.transport, exitNode.node, exitNode.share = true, trans, node, shareCfg
 	exitNode.mu.Unlock()
 	appendLog("[SUCCESS] Выходная нода запущена (l4)")
 	return ""
@@ -83,7 +86,7 @@ func startExitWith(build func() (transport.Transport, error)) string {
 func StopExit() {
 	exitNode.mu.Lock()
 	trans, node := exitNode.transport, exitNode.node
-	exitNode.running, exitNode.transport, exitNode.node = false, nil, nil
+	exitNode.running, exitNode.transport, exitNode.node, exitNode.share = false, nil, nil, nil
 	exitNode.mu.Unlock()
 	detachCaptcha()
 	CancelCaptcha()

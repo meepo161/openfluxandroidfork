@@ -20,17 +20,40 @@ type sessionSpec struct {
 	Params   map[string]interface{} `json:"params"`
 }
 
-// buildSession mirrors the CLI client's --negotiate / --transports path, so
-// the phone talks to an exit started with the same transports and --url.
-// specsJSON is a JSON array of sessionSpec. exit builds the exit node's
-// side (the phone as an l4 exit).
-func buildSession(specsJSON, secret string, exit bool) (transport.Transport, error) {
+// parseSessionSpecs reads what the app sends: a JSON array of sessionSpec,
+// or {"context": ..., "transports": [...]} when the profile carries the
+// exit's encryption context explicitly (imported from an openflux:// link).
+// Without one the context is derived with sessionContext.
+func parseSessionSpecs(specsJSON string) ([]sessionSpec, string, error) {
+	var wrapped struct {
+		Context    string        `json:"context"`
+		Transports []sessionSpec `json:"transports"`
+	}
 	var specs []sessionSpec
 	if err := json.Unmarshal([]byte(specsJSON), &specs); err != nil {
-		return nil, fmt.Errorf("список транспортов: %w", err)
+		if err := json.Unmarshal([]byte(specsJSON), &wrapped); err != nil {
+			return nil, "", fmt.Errorf("список транспортов: %w", err)
+		}
+		specs = wrapped.Transports
 	}
 	if len(specs) == 0 {
-		return nil, fmt.Errorf("список транспортов пуст")
+		return nil, "", fmt.Errorf("список транспортов пуст")
+	}
+	context := wrapped.Context
+	if context == "" {
+		context = sessionContext(specs)
+	}
+	return specs, context, nil
+}
+
+// buildSession mirrors the CLI client's --negotiate / --transports path, so
+// the phone talks to an exit started with the same transports and --url.
+// specsJSON is what parseSessionSpecs reads. exit builds the exit node's
+// side (the phone as an l4 exit).
+func buildSession(specsJSON, secret string, exit bool) (transport.Transport, error) {
+	specs, context, err := parseSessionSpecs(specsJSON)
+	if err != nil {
+		return nil, err
 	}
 	if len(secret) < 16 {
 		return nil, fmt.Errorf("для режима Session нужен ключ шифрования не короче 16 символов")
@@ -49,7 +72,6 @@ func buildSession(specsJSON, secret string, exit bool) (transport.Transport, err
 	if err != nil {
 		return nil, err
 	}
-	context := sessionContext(specs)
 	m := manager.New(sess, nil, secret, context)
 	config := transport.DefaultConfig()
 	keys := make(map[string]string)
