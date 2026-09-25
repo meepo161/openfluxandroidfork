@@ -61,8 +61,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.PopupWindow;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -1390,16 +1388,7 @@ public final class MainActivity extends Activity {
         page.addView(buildSettingsSubTabContent(), contentParams);
 
         if (showSave) {
-            Button save = new Button(this);
-            save.setText("Сохранить настройки");
-            save.setAllCaps(false);
-            save.setTextColor(Color.WHITE);
-            save.setTextSize(15);
-            save.setTypeface(Typeface.DEFAULT_BOLD);
-            save.setStateListAnimator(null);
-            save.setBackground(buttonBackground(Color.rgb(79, 124, 255), Color.rgb(59, 93, 191)));
-            save.setOnClickListener(v -> {
-                bounce(v);
+            Button save = primaryButton("Сохранить настройки", () -> {
                 if (settingsSubTab == SETTINGS_NETWORK) applyNetworkSettings();
                 else if (settingsSubTab == SETTINGS_MODE) applyModeSettings();
                 else if (settingsSubTab == SETTINGS_INTERFACE) applyInterfaceSettings();
@@ -1549,21 +1538,19 @@ public final class MainActivity extends Activity {
                 12, secondary, false);
         section.addView(hint, matchWrap());
 
-        RadioGroup modeGroup = new RadioGroup(this);
-        modeGroup.setOrientation(LinearLayout.VERTICAL);
+        String[] modes = {MODE_TUNNEL, MODE_PROXY, MODE_EXIT};
+        Runnable[] onModeChanged = new Runnable[1];
+        View modeChoice = choiceList(new String[][]{
+                {"Туннель", "Весь трафик устройства"},
+                {"Прокси (SOCKS5)", "Без системного туннеля"},
+                {"Выходная нода (L4)", "Телефон выпускает клиентов в интернет"},
+        }, java.util.Arrays.asList(modes).indexOf(editorConnectionMode), i -> {
+            editorConnectionMode = modes[i];
+            onModeChanged[0].run();
+        });
         LinearLayout.LayoutParams modeGroupParams = matchWrap();
         modeGroupParams.topMargin = dp(14);
-        section.addView(modeGroup, modeGroupParams);
-
-        RadioButton tunnelOption = modeRadio("Туннель - весь трафик устройства");
-        RadioButton proxyOption = modeRadio("Прокси (SOCKS5) - без системного туннеля");
-        RadioButton exitOption = modeRadio("Выходная нода (L4) - телефон выпускает клиентов в интернет");
-        modeGroup.addView(tunnelOption);
-        modeGroup.addView(proxyOption);
-        modeGroup.addView(exitOption);
-        if (MODE_PROXY.equals(editorConnectionMode)) proxyOption.setChecked(true);
-        else if (MODE_EXIT.equals(editorConnectionMode)) exitOption.setChecked(true);
-        else tunnelOption.setChecked(true);
+        section.addView(modeChoice, modeGroupParams);
 
         TextView exitHint = text(
                 "Телефон станет выходной нодой: клиенты подключаются к нему через транспорт "
@@ -1687,10 +1674,7 @@ public final class MainActivity extends Activity {
         alwaysOnParams.topMargin = dp(8);
         section.addView(alwaysOnRow, alwaysOnParams);
 
-        modeGroup.setOnCheckedChangeListener((group, checkedId) -> {
-            tap(group);
-            editorConnectionMode = checkedId == proxyOption.getId() ? MODE_PROXY
-                    : checkedId == exitOption.getId() ? MODE_EXIT : MODE_TUNNEL;
+        onModeChanged[0] = () -> {
             boolean nowProxy = MODE_PROXY.equals(editorConnectionMode);
             setViewVisibleAnimated(exitHint, MODE_EXIT.equals(editorConnectionMode));
             setViewVisibleAnimated(portRow, nowProxy);
@@ -1701,7 +1685,7 @@ public final class MainActivity extends Activity {
             setViewVisibleAnimated(credentialsBlock, nowProxy && editorProxyLanAccess && editorProxyAuthEnabled);
             setViewVisibleAnimated(shareCard, nowProxy);
             setViewVisibleAnimated(alwaysOnRow, MODE_TUNNEL.equals(editorConnectionMode));
-        });
+        };
 
         lanSwitch.setOnCheckedChangeListener((button, checked) -> {
             tap(button);
@@ -1991,7 +1975,20 @@ public final class MainActivity extends Activity {
             page.addView(buildProfileEditorHeader());
             LinearLayout.LayoutParams editorParams = new LinearLayout.LayoutParams(-1, 0, 1f);
             editorParams.topMargin = dp(16);
-            page.addView(wrapScroll(buildProfileEditor()), editorParams);
+            View editor = wrapScroll(buildProfileEditor());
+            // The save button is pinned below instead, above the nav pill.
+            editor.setPadding(0, 0, 0, dp(8));
+            page.addView(editor, editorParams);
+            Button save = primaryButton("Сохранить профиль", () -> saveProfileFromEditor(
+                    profileNameInput.getText().toString().trim(),
+                    urlInput.getText().toString().trim(),
+                    encryptionInput.getText().toString().trim(),
+                    maxTokenInput.getText().toString().trim(),
+                    maxUidInput.getText().toString().trim()));
+            LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
+            saveParams.topMargin = dp(10);
+            saveParams.bottomMargin = navClearance();
+            page.addView(save, saveParams);
             return page;
         }
 
@@ -2187,27 +2184,6 @@ public final class MainActivity extends Activity {
         section.addView(sessionFieldsContainer, matchWrap());
         applySessionVisibility();
 
-        Button save = new Button(this);
-        save.setText("Сохранить профиль");
-        save.setAllCaps(false);
-        save.setTextColor(Color.WHITE);
-        save.setTextSize(15);
-        save.setTypeface(Typeface.DEFAULT_BOLD);
-        save.setStateListAnimator(null);
-        save.setBackground(buttonBackground(Color.rgb(79, 124, 255), Color.rgb(59, 93, 191)));
-        save.setOnClickListener(v -> {
-            bounce(v);
-            String name = profileNameInput.getText().toString().trim();
-            String url = urlInput.getText().toString().trim();
-            String secret = encryptionInput.getText().toString().trim();
-            String token = maxTokenInput.getText().toString().trim();
-            String uid = maxUidInput.getText().toString().trim();
-            saveProfileFromEditor(name, url, secret, token, uid);
-        });
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
-        saveParams.topMargin = dp(22);
-        section.addView(save, saveParams);
-
         if (existing != null) {
             Profile toDelete = existing;
             Button delete = new Button(this);
@@ -2233,19 +2209,10 @@ public final class MainActivity extends Activity {
     }
 
     private View buildSessionModeSelector() {
-        RadioGroup group = new RadioGroup(this);
-        group.setOrientation(LinearLayout.VERTICAL);
-        RadioButton classic = modeRadio("Классический: один транспорт");
-        RadioButton session = modeRadio("Session: несколько транспортов с откатом");
-        group.addView(classic);
-        group.addView(session);
-        (editorSession ? session : classic).setChecked(true);
-        group.setOnCheckedChangeListener((g, checkedId) -> {
-            tap(g);
-            editorSession = checkedId == session.getId();
+        return segmented(new String[]{"Классический", "Session"}, editorSession ? 1 : 0, i -> {
+            editorSession = i == 1;
             applySessionVisibility();
         });
-        return group;
     }
 
     private void applySessionVisibility() {
@@ -2330,24 +2297,12 @@ public final class MainActivity extends Activity {
     private View buildExtraTransportRow(Profile.Transport t) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(rounded(surface, border, 1, 10));
-        card.setPadding(dp(8), dp(4), dp(8), dp(10));
+        card.setBackground(rounded(surface, border, 1, 20));
+        card.setPadding(dp(14), dp(4), dp(14), dp(14));
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        Button type = new Button(this);
-        type.setText(transportLabel(t.type) + "  ▾");
-        type.setAllCaps(false);
-        type.setTextColor(accent);
-        type.setTextSize(14);
-        type.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        type.setStateListAnimator(null);
-        type.setBackground(ripple(Color.TRANSPARENT, 9));
-        type.setOnClickListener(v -> {
-            tap(v);
-            chooseExtraTransportType(t);
-        });
-        header.addView(type, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        header.addView(text(transportLabel(t.type), 15, text, true), new LinearLayout.LayoutParams(0, -2, 1f));
         Button remove = new Button(this);
         remove.setText("Удалить");
         remove.setAllCaps(false);
@@ -2362,6 +2317,15 @@ public final class MainActivity extends Activity {
         });
         header.addView(remove, new LinearLayout.LayoutParams(-2, dp(44)));
         card.addView(header, matchWrap());
+
+        String[] types = {"direct", "yandex", "vyandex", "boards", "mailru", "cupsonline", "oneme"};
+        String[] typeLabels = {"Direct", "Yandex", "Volga", "Board", "Mail.ru", "Cups", "MAX"};
+        card.addView(chips(typeLabels, java.util.Arrays.asList(types).indexOf(t.type), i -> {
+            t.type = types[i];
+            t.value = "";
+            t.uid = "";
+            refreshExtras();
+        }), matchWrap());
 
         boolean max = "oneme".equals(t.type);
         boolean direct = "direct".equals(t.type);
@@ -2380,25 +2344,6 @@ public final class MainActivity extends Activity {
         bindText(priority, v -> t.priority = parsePriority(v, t.priority));
         boxedInput(card, priority, dp(12));
         return card;
-    }
-
-    private void chooseExtraTransportType(Profile.Transport t) {
-        String[] types = {"direct", "yandex", "vyandex", "boards", "mailru", "cupsonline", "oneme"};
-        String[] labels = new String[types.length];
-        for (int i = 0; i < types.length; i++) labels[i] = transportLabel(types[i]);
-        new AlertDialog.Builder(this, darkMode
-                ? android.R.style.Theme_DeviceDefault_Dialog_Alert
-                : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
-                .setTitle("Тип транспорта")
-                .setItems(labels, (dialog, which) -> {
-                    if (!types[which].equals(t.type)) {
-                        t.type = types[which];
-                        t.value = "";
-                        t.uid = "";
-                    }
-                    refreshExtras();
-                })
-                .show();
     }
 
     // Returns why an extra Session transport can't be saved, or null.
@@ -2512,41 +2457,23 @@ public final class MainActivity extends Activity {
     }
 
     private View buildTransportTypeSelector() {
-        RadioGroup group = new RadioGroup(this);
-        group.setOrientation(LinearLayout.VERTICAL);
-        RadioButton yandexButton = modeRadio("Yandex Docs");
-        RadioButton vyandexButton = modeRadio("Yandex Docs (Volga, экспериментальный)");
-        RadioButton boardsButton = modeRadio("Yandex Board (экспериментальный)");
-        RadioButton mailruButton = modeRadio("Mail.ru Docs");
-        RadioButton cupsButton = modeRadio("Cups.online");
-        RadioButton maxButton = modeRadio("MAX (OneMe)");
-        group.addView(yandexButton);
-        group.addView(vyandexButton);
-        group.addView(boardsButton);
-        group.addView(mailruButton);
-        group.addView(cupsButton);
-        group.addView(maxButton);
-        if ("vyandex".equals(editorTransportType)) vyandexButton.setChecked(true);
-        else if ("boards".equals(editorTransportType)) boardsButton.setChecked(true);
-        else if ("mailru".equals(editorTransportType)) mailruButton.setChecked(true);
-        else if ("cupsonline".equals(editorTransportType)) cupsButton.setChecked(true);
-        else if ("oneme".equals(editorTransportType)) maxButton.setChecked(true);
-        else yandexButton.setChecked(true);
-        group.setOnCheckedChangeListener((g, checkedId) -> {
-            tap(g);
-            if (checkedId == vyandexButton.getId()) editorTransportType = "vyandex";
-            else if (checkedId == boardsButton.getId()) editorTransportType = "boards";
-            else if (checkedId == mailruButton.getId()) editorTransportType = "mailru";
-            else if (checkedId == cupsButton.getId()) editorTransportType = "cupsonline";
-            else if (checkedId == maxButton.getId()) editorTransportType = "oneme";
-            else editorTransportType = "yandex";
+        String[] types = {"yandex", "vyandex", "boards", "mailru", "cupsonline", "oneme"};
+        int current = Math.max(0, java.util.Arrays.asList(types).indexOf(editorTransportType));
+        return choiceList(new String[][]{
+                {"Yandex Docs", "Документ Яндекса"},
+                {"Yandex Docs (Volga)", "Экспериментальный"},
+                {"Yandex Board", "Доска Яндекса, экспериментальный"},
+                {"Mail.ru Docs", "Документ в Облаке Mail.ru"},
+                {"Cups.online", "Комнаты live-coding, код комнат с ноды"},
+                {"MAX (OneMe)", "Звонок MAX, нужен Web token"},
+        }, current, i -> {
+            editorTransportType = types[i];
             if (maxFieldsContainer != null) {
                 maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
             }
             setFloatingLabel(urlInput, transportValueLabel(editorTransportType));
             if (urlField != null) urlField.setVisibility("oneme".equals(editorTransportType) ? View.GONE : View.VISIBLE);
         });
-        return group;
     }
 
     // MAX (OneMe) authenticates via a web token + numeric user id instead of
@@ -2579,19 +2506,10 @@ public final class MainActivity extends Activity {
     }
 
     private View buildCodecSelector() {
-        RadioGroup group = new RadioGroup(this);
-        group.setOrientation(LinearLayout.VERTICAL);
-        RadioButton batchedButton = modeRadio("Batched + zstd (по умолчанию)");
-        RadioButton legacyButton = modeRadio("Legacy (LZ4, для совместимости со старым exit-node)");
-        group.addView(batchedButton);
-        group.addView(legacyButton);
-        if ("legacy".equals(editorCodec)) legacyButton.setChecked(true);
-        else batchedButton.setChecked(true);
-        group.setOnCheckedChangeListener((g, checkedId) -> {
-            tap(g);
-            editorCodec = checkedId == legacyButton.getId() ? "legacy" : "batched";
-        });
-        return group;
+        return choiceList(new String[][]{
+                {"Batched + zstd", "По умолчанию"},
+                {"Legacy (LZ4)", "Для совместимости со старым exit-node"},
+        }, "legacy".equals(editorCodec) ? 1 : 0, i -> editorCodec = i == 1 ? "legacy" : "batched");
     }
 
     private View buildNetworkSettings() {
@@ -2821,21 +2739,19 @@ public final class MainActivity extends Activity {
                 12, secondary, false);
         section.addView(hint, matchWrap());
 
-        RadioGroup modeGroup = new RadioGroup(this);
-        modeGroup.setOrientation(LinearLayout.VERTICAL);
+        String[] filterModes = {AppFilter.MODE_OFF, AppFilter.MODE_WHITELIST, AppFilter.MODE_BLACKLIST};
+        Runnable[] onFilterChanged = new Runnable[1];
+        View filterChoice = choiceList(new String[][]{
+                {"Все приложения"},
+                {"Только выбранные", "Белый список"},
+                {"Все, кроме выбранных", "Чёрный список"},
+        }, Math.max(0, java.util.Arrays.asList(filterModes).indexOf(editorAppFilterMode)), i -> {
+            editorAppFilterMode = filterModes[i];
+            onFilterChanged[0].run();
+        });
         LinearLayout.LayoutParams modeGroupParams = matchWrap();
         modeGroupParams.topMargin = dp(12);
-        section.addView(modeGroup, modeGroupParams);
-
-        RadioButton offButton = modeRadio("Все приложения");
-        RadioButton whitelistButton = modeRadio("Только выбранные (белый список)");
-        RadioButton blacklistButton = modeRadio("Все, кроме выбранных (чёрный список)");
-        modeGroup.addView(offButton);
-        modeGroup.addView(whitelistButton);
-        modeGroup.addView(blacklistButton);
-        if (AppFilter.MODE_WHITELIST.equals(editorAppFilterMode)) whitelistButton.setChecked(true);
-        else if (AppFilter.MODE_BLACKLIST.equals(editorAppFilterMode)) blacklistButton.setChecked(true);
-        else offButton.setChecked(true);
+        section.addView(filterChoice, modeGroupParams);
 
         LinearLayout listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
@@ -2851,13 +2767,8 @@ public final class MainActivity extends Activity {
         listContainer.addView(appListView, new LinearLayout.LayoutParams(-1, -1));
         section.addView(listContainer, listContainerParams);
 
-        modeGroup.setOnCheckedChangeListener((group, checkedId) -> {
-            tap(group);
-            if (checkedId == whitelistButton.getId()) editorAppFilterMode = AppFilter.MODE_WHITELIST;
-            else if (checkedId == blacklistButton.getId()) editorAppFilterMode = AppFilter.MODE_BLACKLIST;
-            else editorAppFilterMode = AppFilter.MODE_OFF;
-            setViewVisibleAnimated(listContainer, !AppFilter.MODE_OFF.equals(editorAppFilterMode));
-        });
+        onFilterChanged[0] = () ->
+                setViewVisibleAnimated(listContainer, !AppFilter.MODE_OFF.equals(editorAppFilterMode));
 
         return section;
     }
@@ -2876,14 +2787,189 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private RadioButton modeRadio(String labelValue) {
-        RadioButton button = new RadioButton(this);
-        button.setId(View.generateViewId());
-        button.setText(labelValue);
-        button.setTextColor(text);
-        button.setTextSize(14);
-        button.setPadding(dp(6), dp(10), dp(6), dp(10));
-        button.setButtonTintList(ColorStateList.valueOf(accent));
+    // accent laid over surface at the given strength: the tonal fill of a
+    // selected choice.
+    private int tonal(float strength) {
+        return Color.rgb(
+                (int) (Color.red(surface) + (Color.red(accent) - Color.red(surface)) * strength),
+                (int) (Color.green(surface) + (Color.green(accent) - Color.green(surface)) * strength),
+                (int) (Color.blue(surface) + (Color.blue(accent) - Color.blue(surface)) * strength));
+    }
+
+    private android.graphics.drawable.Drawable tile(int fill, int strokeColor, float[] radii) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(fill);
+        shape.setCornerRadii(radii);
+        shape.setStroke(dp(1), strokeColor);
+        return new android.graphics.drawable.RippleDrawable(
+                ColorStateList.valueOf(Color.argb(40, Color.red(accent), Color.green(accent), Color.blue(accent))),
+                shape, null);
+    }
+
+    private ImageView choiceCheck() {
+        ImageView check = icon(R.drawable.ic_check, Color.WHITE);
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(accent);
+        check.setBackground(dot);
+        check.setPadding(dp(3), dp(3), dp(3), dp(3));
+        return check;
+    }
+
+    // Single choice as stacked tiles, Android 15-16 style: the group has
+    // large outer corners and small inner ones, the picked tile gets a tonal
+    // fill and a check. options[i] is {title} or {title, subtitle}.
+    private View choiceList(String[][] options, int selected, java.util.function.IntConsumer onPick) {
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        int n = options.length;
+        LinearLayout[] rows = new LinearLayout[n];
+        TextView[] titles = new TextView[n];
+        ImageView[] checks = new ImageView[n];
+        int[] current = {selected};
+        Runnable paint = () -> {
+            for (int i = 0; i < n; i++) {
+                boolean on = i == current[0];
+                float top = dp(i == 0 ? 20 : 6), bottom = dp(i == n - 1 ? 20 : 6);
+                rows[i].setBackground(tile(on ? tonal(0.18f) : surface, on ? tonal(0.45f) : border,
+                        new float[]{top, top, top, top, bottom, bottom, bottom, bottom}));
+                titles[i].setTextColor(on ? accent : text);
+                ImageView check = checks[i];
+                check.animate().cancel();
+                if (on && check.getVisibility() != View.VISIBLE) {
+                    check.setVisibility(View.VISIBLE);
+                    check.setScaleX(0f);
+                    check.setScaleY(0f);
+                    check.animate().scaleX(1f).scaleY(1f).setDuration(220)
+                            .setInterpolator(new OvershootInterpolator()).start();
+                } else if (!on) {
+                    check.setVisibility(View.INVISIBLE);
+                }
+            }
+        };
+        for (int i = 0; i < n; i++) {
+            int index = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setMinimumHeight(dp(60));
+            row.setPadding(dp(18), dp(12), dp(16), dp(12));
+            LinearLayout copy = new LinearLayout(this);
+            copy.setOrientation(LinearLayout.VERTICAL);
+            titles[i] = text(options[i][0], 15, text, true);
+            copy.addView(titles[i]);
+            if (options[i].length > 1) copy.addView(text(options[i][1], 12, secondary, false));
+            row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+            checks[i] = choiceCheck();
+            checks[i].setVisibility(i == selected ? View.VISIBLE : View.INVISIBLE);
+            row.addView(checks[i], new LinearLayout.LayoutParams(dp(24), dp(24)));
+            row.setOnClickListener(v -> {
+                if (current[0] == index) return;
+                tap(v);
+                current[0] = index;
+                paint.run();
+                onPick.accept(index);
+            });
+            rows[i] = row;
+            LinearLayout.LayoutParams params = matchWrap();
+            if (i > 0) params.topMargin = dp(2);
+            list.addView(row, params);
+        }
+        paint.run();
+        return list;
+    }
+
+    // Material 3 segmented button: one pill split into equal segments, the
+    // picked one tonal with a leading check.
+    private View segmented(String[] labels, int selected, java.util.function.IntConsumer onPick) {
+        LinearLayout bar = new LinearLayout(this);
+        int n = labels.length;
+        LinearLayout[] segments = new LinearLayout[n];
+        TextView[] titles = new TextView[n];
+        ImageView[] checks = new ImageView[n];
+        int[] current = {selected};
+        Runnable paint = () -> {
+            for (int i = 0; i < n; i++) {
+                boolean on = i == current[0];
+                float left = i == 0 ? dp(24) : 0, right = i == n - 1 ? dp(24) : 0;
+                segments[i].setBackground(tile(on ? tonal(0.18f) : surface, on ? tonal(0.45f) : border,
+                        new float[]{left, left, right, right, right, right, left, left}));
+                titles[i].setTextColor(on ? accent : text);
+                checks[i].setVisibility(on ? View.VISIBLE : View.GONE);
+            }
+        };
+        for (int i = 0; i < n; i++) {
+            int index = i;
+            LinearLayout segment = new LinearLayout(this);
+            segment.setGravity(Gravity.CENTER);
+            checks[i] = icon(R.drawable.ic_check, accent);
+            LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(dp(18), dp(18));
+            checkParams.rightMargin = dp(6);
+            segment.addView(checks[i], checkParams);
+            titles[i] = text(labels[i], 14, text, true);
+            segment.addView(titles[i]);
+            segment.setOnClickListener(v -> {
+                if (current[0] == index) return;
+                tap(v);
+                current[0] = index;
+                android.transition.TransitionManager.beginDelayedTransition(bar);
+                paint.run();
+                onPick.accept(index);
+            });
+            segments[i] = segment;
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            if (i > 0) params.leftMargin = -dp(1);
+            bar.addView(segment, params);
+        }
+        paint.run();
+        return bar;
+    }
+
+    // A horizontal row of filter chips, one picked.
+    private View chips(String[] labels, int selected, java.util.function.IntConsumer onPick) {
+        android.widget.HorizontalScrollView scroll = new android.widget.HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout row = new LinearLayout(this);
+        scroll.addView(row);
+        for (int i = 0; i < labels.length; i++) {
+            int index = i;
+            boolean on = i == selected;
+            LinearLayout chip = new LinearLayout(this);
+            chip.setGravity(Gravity.CENTER_VERTICAL);
+            chip.setPadding(dp(on ? 10 : 14), 0, dp(14), 0);
+            float r = dp(10);
+            chip.setBackground(tile(on ? tonal(0.18f) : surface, on ? tonal(0.45f) : border,
+                    new float[]{r, r, r, r, r, r, r, r}));
+            if (on) {
+                LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(dp(16), dp(16));
+                checkParams.rightMargin = dp(6);
+                chip.addView(icon(R.drawable.ic_check, accent), checkParams);
+            }
+            chip.addView(text(labels[i], 13, on ? accent : text, on));
+            chip.setOnClickListener(v -> {
+                if (index == selected) return;
+                tap(v);
+                onPick.accept(index);
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(34));
+            if (i > 0) params.leftMargin = dp(8);
+            row.addView(chip, params);
+        }
+        return scroll;
+    }
+
+    private Button primaryButton(String label, Runnable action) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(15);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setStateListAnimator(null);
+        button.setBackground(buttonBackground(Color.rgb(79, 124, 255), Color.rgb(59, 93, 191)));
+        button.setOnClickListener(v -> {
+            bounce(v);
+            action.run();
+        });
         return button;
     }
 
