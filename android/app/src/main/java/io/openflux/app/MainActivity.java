@@ -192,6 +192,10 @@ public final class MainActivity extends Activity {
     private static final android.view.animation.Interpolator EMPHASIZED =
             new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
     private ImageView proxyShareQr;
+    // The pinned save button of the current page, if any; it stays down
+    // behind the keyboard instead of riding up with it.
+    private View pinnedSave;
+    private boolean keyboardOpen;
     // Exit mode: the home card with the QR clients scan to join this phone;
     // exitShareShown is the link (or error) it currently renders.
     private LinearLayout exitShareCard;
@@ -510,15 +514,13 @@ public final class MainActivity extends Activity {
             // any gesture bar ever is; treat that as "keyboard open" and hide
             // the pill instead of letting it get dragged up with it.
             if (gestureInset < 0) gestureInset = bottom;
-            boolean keyboardOpen = bottom > gestureInset + dp(50);
+            keyboardOpen = bottom > gestureInset + dp(50);
             navBottomInset = gestureInset;
             // Edge-to-edge (targetSdk 35) means the window is not resized for
-            // the keyboard: lift the page ourselves. Pages already keep
-            // navClearance() free at the bottom for the (now hidden) pill, so
-            // only the rest of the keyboard height is added. The shrinking
+            // the keyboard: lift the page above it ourselves. The shrinking
             // ScrollView then brings the focused field back into view.
-            int lift = keyboardOpen ? Math.max(0, bottom - navClearance()) : 0;
-            body.setPadding(side, top + insets.getSystemWindowInsetTop(), side, lift);
+            body.setPadding(side, top + insets.getSystemWindowInsetTop(), side, keyboardOpen ? bottom : 0);
+            if (pinnedSave != null) pinnedSave.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
             View nav = root.getChildAt(root.getChildCount() - 1);
             navScrim.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
             navDeadZone.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
@@ -766,6 +768,7 @@ public final class MainActivity extends Activity {
         if (page != PAGE_SETTINGS) settingsDetailOpen = false;
         if (page != PAGE_PROFILES) profileEditorOpen = false;
         currentPage = page;
+        pinnedSave = null;
         View pageView = page == PAGE_HOME ? buildHomePage()
                 : page == PAGE_PROFILES ? buildProfilesPage()
                 : page == PAGE_LOGS ? buildLogsPage() : buildSettingsPage();
@@ -1419,6 +1422,8 @@ public final class MainActivity extends Activity {
             // the scroll section's internal padding doesn't cover it.
             saveParams.bottomMargin = navClearance();
             page.addView(save, saveParams);
+            pinnedSave = save;
+            if (keyboardOpen) save.setVisibility(View.GONE);
         }
         return page;
     }
@@ -2001,6 +2006,8 @@ public final class MainActivity extends Activity {
             saveParams.topMargin = dp(10);
             saveParams.bottomMargin = navClearance();
             page.addView(save, saveParams);
+            pinnedSave = save;
+            if (keyboardOpen) save.setVisibility(View.GONE);
             return page;
         }
 
