@@ -106,6 +106,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A hand-written description in .github/release-notes/<tag>.md wins
+          # over the generic one below.
+          notes=".github/release-notes/$RELEASE_TAG.md"
+          if [ -f "$notes" ]; then
+            gh release create "$RELEASE_TAG" \
+              dist/OpenFlux-android-*-release.apk \
+              dist/openflux-* \
+              dist/SHA256SUMS \
+              --verify-tag \
+              --title "OpenFlux Android $RELEASE_TAG" \
+              --notes-file "$notes"
+            exit 0
+          fi
           gh release create "$RELEASE_TAG" \
             dist/OpenFlux-android-*-release.apk \
             dist/openflux-* \
