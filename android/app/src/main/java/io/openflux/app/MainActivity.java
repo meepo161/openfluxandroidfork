@@ -36,6 +36,7 @@ import android.os.Vibrator;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
@@ -142,6 +143,7 @@ public final class MainActivity extends Activity {
     private boolean urlVisible;
     private boolean autoScroll = true;
     private boolean showSensitiveLogs = true;
+    private boolean joinCelebration;
     private int currentPage = PAGE_HOME;
     private int settingsSubTab = SETTINGS_MODE;
     private boolean settingsDetailOpen;
@@ -232,6 +234,7 @@ public final class MainActivity extends Activity {
     private boolean editorDarkMode;
     private boolean editorAutoScroll;
     private boolean editorShowSensitiveLogs;
+    private boolean editorJoinCelebration;
     private String editorAppFilterMode = AppFilter.MODE_OFF;
     private final LinkedHashSet<String> editorSelectedApps = new LinkedHashSet<>();
     private String logs = "";
@@ -298,6 +301,7 @@ public final class MainActivity extends Activity {
         proxyPassword = secureSettings.getString("proxy_password", "");
         autoScroll = prefs.getBoolean("auto_scroll", true);
         showSensitiveLogs = prefs.getBoolean("show_sensitive_logs", true);
+        joinCelebration = prefs.getBoolean("join_celebration", false);
         darkMode = prefs.contains("dark_mode")
                 ? prefs.getBoolean("dark_mode", isSystemDark())
                 : isSystemDark();
@@ -358,7 +362,8 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("Добавить", (dialog, which) -> {
                     profiles.add(p);
                     profileStore.save(profiles);
-                    selectProfile(p.id);
+                    if (isConnectionRunning()) showPage(PAGE_PROFILES);
+                    else selectProfile(p.id);
                     appendLog("Профиль «" + p.name + "» добавлен по QR");
                     Toast.makeText(this, "Профиль добавлен", Toast.LENGTH_SHORT).show();
                 })
@@ -800,6 +805,7 @@ public final class MainActivity extends Activity {
             editorDarkMode = darkMode;
             editorAutoScroll = autoScroll;
             editorShowSensitiveLogs = showSensitiveLogs;
+            editorJoinCelebration = joinCelebration;
         } else if (tab == SETTINGS_APPS) {
             editorAppFilterMode = appFilterMode;
             editorSelectedApps.clear();
@@ -892,6 +898,10 @@ public final class MainActivity extends Activity {
     }
 
     private void selectProfile(long id) {
+        if (id != selectedProfileId && isConnectionRunning()) {
+            Toast.makeText(this, "Сначала отключитесь, затем меняйте профиль", Toast.LENGTH_SHORT).show();
+            return;
+        }
         selectedProfileId = id;
         profileStore.setSelectedId(id);
         applySelectedProfileToFields();
@@ -923,13 +933,10 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, "Укажите название профиля", Toast.LENGTH_SHORT).show();
             return;
         }
-        boolean isMax = "oneme".equals(editorTransportType);
-        if (!isMax && !isValidDocumentUrl(docUrl)) {
-            Toast.makeText(this, "Укажите корректную HTTPS-ссылку на документ", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (isMax && token.isEmpty()) {
-            Toast.makeText(this, "Укажите MAX Web token", Toast.LENGTH_SHORT).show();
+        String valueProblem = transportValueProblem(editorTransportType,
+                "oneme".equals(editorTransportType) ? token : docUrl, true);
+        if (valueProblem != null) {
+            Toast.makeText(this, valueProblem, Toast.LENGTH_LONG).show();
             return;
         }
         if (!secret.isEmpty() && secret.length() < 16) {
@@ -1068,7 +1075,9 @@ public final class MainActivity extends Activity {
         row.setOnClickListener(v -> {
             bounce(v);
             if (profiles.isEmpty()) showPage(PAGE_PROFILES);
-            else showProfileDropdown(v);
+            else if (isConnectionRunning()) {
+                Toast.makeText(this, "Сначала отключитесь, затем меняйте профиль", Toast.LENGTH_SHORT).show();
+            } else showProfileDropdown(v);
         });
         return row;
     }
@@ -1878,7 +1887,7 @@ public final class MainActivity extends Activity {
         if (trailingButton != null) {
             row.addView(trailingButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
         }
-        return row;
+        return floating(row, input);
     }
 
     private void toggleProxyPasswordVisibility() {
@@ -2096,7 +2105,9 @@ public final class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT);
         profileNameInput.setPadding(dp(16), 0, dp(16), 0);
         nameField.addView(profileNameInput, new FrameLayout.LayoutParams(-1, -1));
-        section.addView(nameField, new LinearLayout.LayoutParams(-1, dp(56)));
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, dp(56));
+        nameParams.topMargin = dp(8);
+        section.addView(floating(nameField, profileNameInput), nameParams);
 
         TextView iconLabel = label("ЗНАЧОК");
         LinearLayout.LayoutParams iconLabelParams = matchWrap();
@@ -2143,7 +2154,7 @@ public final class MainActivity extends Activity {
         section.addView(buildUrlField(initialUrl), urlParams);
 
         LinearLayout.LayoutParams encryptionParams = new LinearLayout.LayoutParams(-1, dp(56));
-        encryptionParams.topMargin = dp(8);
+        encryptionParams.topMargin = dp(16);
         section.addView(buildEncryptionField(initialSecret), encryptionParams);
         TextView encryptionHint = text(
                 "Необязательно: оставьте пустым, чтобы подключаться без сквозного шифрования "
@@ -2262,9 +2273,9 @@ public final class MainActivity extends Activity {
         hintParams.rightMargin = dp(4);
         box.addView(hintView, hintParams);
 
-        caption(box, "Приоритет основного транспорта (больше - важнее)", dp(12));
-        priorityInput = settingInput("50", Integer.toString(editorPriority), InputType.TYPE_CLASS_NUMBER);
-        boxedInput(box, priorityInput, dp(4));
+        priorityInput = settingInput("Приоритет основного транспорта (больше - важнее)",
+                Integer.toString(editorPriority), InputType.TYPE_CLASS_NUMBER);
+        boxedInput(box, priorityInput, dp(16));
 
         TextView extrasLabel = label("ДОПОЛНИТЕЛЬНЫЕ ТРАНСПОРТЫ");
         LinearLayout.LayoutParams extrasLabelParams = matchWrap();
@@ -2342,22 +2353,20 @@ public final class MainActivity extends Activity {
 
         boolean max = "oneme".equals(t.type);
         boolean direct = "direct".equals(t.type);
-        EditText value = settingInput(
-                direct ? "Адрес ноды: host:port" : max ? "MAX Web token" : "HTTPS-ссылка на документ",
-                t.value,
+        EditText value = settingInput(transportValueLabel(t.type), t.value,
                 max ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
                         : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         bindText(value, v -> t.value = v);
-        boxedInput(card, value, dp(4));
+        boxedInput(card, value, dp(12));
         if (max) {
             EditText uid = settingInput("MAX call user id", t.uid, InputType.TYPE_CLASS_NUMBER);
             bindText(uid, v -> t.uid = v);
-            boxedInput(card, uid, dp(8));
+            boxedInput(card, uid, dp(12));
         }
-        caption(card, "Приоритет (больше - важнее)", dp(8));
-        EditText priority = settingInput("100", Integer.toString(t.priority), InputType.TYPE_CLASS_NUMBER);
+        EditText priority = settingInput("Приоритет (больше - важнее)", Integer.toString(t.priority),
+                InputType.TYPE_CLASS_NUMBER);
         bindText(priority, v -> t.priority = parsePriority(v, t.priority));
-        boxedInput(card, priority, dp(4));
+        boxedInput(card, priority, dp(12));
         return card;
     }
 
@@ -2382,20 +2391,48 @@ public final class MainActivity extends Activity {
 
     // Returns why an extra Session transport can't be saved, or null.
     private String extraTransportProblem(Profile.Transport t) {
-        if ("direct".equals(t.type)) {
-            int colon = t.value.lastIndexOf(':');
-            int port = colon > 0 ? parsePriority(t.value.substring(colon + 1), -1) : -1;
-            if (colon <= 0 || port < 1 || port > 65535) {
-                return "Direct: укажите адрес ноды в виде host:port";
+        return transportValueProblem(t.type, t.value, true);
+    }
+
+    private static final Pattern CUPS_ROOMS_CODE = Pattern.compile("[A-Za-z0-9_-]+");
+
+    // Returns why value can't serve as the transport's main field (document
+    // link, board link, room code, node address, token), or null. Cups.online
+    // takes the base64 room code the exit prints, or a link carrying it; the
+    // exit itself creates the rooms and needs nothing, so an empty code is
+    // allowed when saving (allowEmptyCups) and checked again on connect.
+    private String transportValueProblem(String type, String value, boolean allowEmptyCups) {
+        String label = transportLabel(type);
+        switch (type) {
+            case "direct": {
+                int colon = value.lastIndexOf(':');
+                int port = colon > 0 ? parsePriority(value.substring(colon + 1), -1) : -1;
+                return colon <= 0 || port < 1 || port > 65535 ? label + ": укажите адрес ноды в виде host:port" : null;
             }
-            return null;
+            case "oneme":
+                return value.isEmpty() ? "MAX: укажите Web token" : null;
+            case "cupsonline":
+                if (value.isEmpty()) return allowEmptyCups ? null : "Cups.online: укажите код комнат с ноды";
+                return isValidDocumentUrl(value) || CUPS_ROOMS_CODE.matcher(value).matches()
+                        ? null : "Cups.online: код комнат - строка base64 из лога ноды";
+            case "boards":
+                return isValidDocumentUrl(value) ? null : label + ": укажите HTTPS-ссылку на доску";
+            default:
+                return isValidDocumentUrl(value) ? null : label + ": укажите HTTPS-ссылку на документ";
         }
-        if ("oneme".equals(t.type)) {
-            return t.value.isEmpty() ? "MAX: укажите Web token дополнительного транспорта" : null;
+    }
+
+    // The main field's label for a transport type.
+    private static String transportValueLabel(String type) {
+        switch (type) {
+            case "direct": return "Адрес ноды (host:port)";
+            case "oneme": return "MAX Web token";
+            case "boards": return "Ссылка на доску Yandex Board";
+            case "mailru": return "Ссылка на документ Mail.ru";
+            case "cupsonline": return "Код комнат Cups.online (base64)";
+            case "vyandex": return "Ссылка на документ Yandex (Volga)";
+            default: return "Ссылка на документ Yandex";
         }
-        return isValidDocumentUrl(t.value)
-                ? null
-                : transportLabel(t.type) + ": укажите корректную HTTPS-ссылку на документ";
     }
 
     private static int parsePriority(String value, int fallback) {
@@ -2406,13 +2443,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void caption(LinearLayout parent, String value, int topMargin) {
-        LinearLayout.LayoutParams params = matchWrap();
-        params.topMargin = topMargin;
-        params.leftMargin = dp(4);
-        parent.addView(text(value, 12, secondary, false), params);
-    }
-
     private void boxedInput(LinearLayout parent, EditText input, int topMargin) {
         FrameLayout field = new FrameLayout(this);
         field.setBackground(rounded(surface, border, 1, 10));
@@ -2420,7 +2450,7 @@ public final class MainActivity extends Activity {
         field.addView(input, new FrameLayout.LayoutParams(-1, -1));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(56));
         params.topMargin = topMargin;
-        parent.addView(field, params);
+        parent.addView(floating(field, input), params);
     }
 
     private static void bindText(EditText input, Consumer<String> sink) {
@@ -2501,6 +2531,7 @@ public final class MainActivity extends Activity {
             if (maxFieldsContainer != null) {
                 maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
             }
+            setFloatingLabel(urlInput, transportValueLabel(editorTransportType));
         });
         return group;
     }
@@ -2517,7 +2548,9 @@ public final class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         maxTokenInput.setPadding(dp(16), 0, dp(16), 0);
         tokenField.addView(maxTokenInput, new FrameLayout.LayoutParams(-1, -1));
-        box.addView(tokenField, new LinearLayout.LayoutParams(-1, dp(56)));
+        LinearLayout.LayoutParams tokenParams = new LinearLayout.LayoutParams(-1, dp(56));
+        tokenParams.topMargin = dp(8);
+        box.addView(floating(tokenField, maxTokenInput), tokenParams);
 
         FrameLayout uidField = new FrameLayout(this);
         uidField.setBackground(rounded(surface, border, 1, 10));
@@ -2526,8 +2559,8 @@ public final class MainActivity extends Activity {
         maxUidInput.setPadding(dp(16), 0, dp(16), 0);
         uidField.addView(maxUidInput, new FrameLayout.LayoutParams(-1, -1));
         LinearLayout.LayoutParams uidParams = new LinearLayout.LayoutParams(-1, dp(56));
-        uidParams.topMargin = dp(8);
-        box.addView(uidField, uidParams);
+        uidParams.topMargin = dp(16);
+        box.addView(floating(uidField, maxUidInput), uidParams);
 
         return box;
     }
@@ -2623,9 +2656,11 @@ public final class MainActivity extends Activity {
     private void applyInterfaceSettings() {
         autoScroll = editorAutoScroll;
         showSensitiveLogs = editorShowSensitiveLogs;
+        joinCelebration = editorJoinCelebration;
         getSharedPreferences(SETTINGS_PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean("auto_scroll", autoScroll)
                 .putBoolean("show_sensitive_logs", showSensitiveLogs)
+                .putBoolean("join_celebration", joinCelebration)
                 .apply();
         // Rebuilds the whole shell/page when the theme actually changed, so
         // it must run last - everything above needs to be committed first.
@@ -2751,6 +2786,17 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams showSensitiveParams = matchWrap();
         showSensitiveParams.topMargin = dp(8);
         section.addView((View) showSensitiveSwitch.getTag(), showSensitiveParams);
+
+        Switch celebrationSwitch = settingSwitch(R.drawable.ic_check, "Салют при подключении клиента",
+                "Режим выходной ноды: вспышка, конфетти и вибрация, когда к телефону подключается клиент",
+                editorJoinCelebration);
+        celebrationSwitch.setOnCheckedChangeListener((button, checked) -> {
+            tap(button);
+            editorJoinCelebration = checked;
+        });
+        LinearLayout.LayoutParams celebrationParams = matchWrap();
+        celebrationParams.topMargin = dp(8);
+        section.addView((View) celebrationSwitch.getTag(), celebrationParams);
         return section;
     }
 
@@ -2947,7 +2993,7 @@ public final class MainActivity extends Activity {
     private View buildUrlField(String initialValue) {
         FrameLayout field = new FrameLayout(this);
         field.setBackground(rounded(surface, border, 1, 10));
-        urlInput = settingInput("HTTPS-ссылка на документ", initialValue,
+        urlInput = settingInput(transportValueLabel(editorTransportType), initialValue,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         urlInput.setTransformationMethod(urlVisible ? null : PasswordTransformationMethod.getInstance());
         urlInput.setPadding(dp(16), 0, dp(56), 0);
@@ -2961,7 +3007,7 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams eye = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.END | Gravity.CENTER_VERTICAL);
         eye.rightMargin = dp(4);
         field.addView(visibilityButton, eye);
-        return field;
+        return floating(field, urlInput);
     }
 
     private View buildEncryptionField(String initialValue) {
@@ -2983,7 +3029,7 @@ public final class MainActivity extends Activity {
                 dp(48), dp(48), Gravity.END | Gravity.CENTER_VERTICAL);
         eye.rightMargin = dp(4);
         field.addView(encryptionVisibilityButton, eye);
-        return field;
+        return floating(field, encryptionInput);
     }
 
     private LinearLayout cardRow(int iconRes, String titleValue, String detailValue) {
@@ -3036,6 +3082,97 @@ public final class MainActivity extends Activity {
         row.addView(toggle, new LinearLayout.LayoutParams(-2, dp(42)));
         toggle.setTag(row);
         return toggle;
+    }
+
+    // Wraps an outlined field (box holding input) in a Google-style floating
+    // label: the label rests inside the box like a hint while the field is
+    // empty and slides up onto the top border once it has text or focus.
+    // The input's hint becomes the label; setFloatingLabel changes it later.
+    private View floating(View box, EditText input) {
+        FrameLayout wrapper = new FrameLayout(this);
+        wrapper.setClipChildren(false);
+        wrapper.addView(box, new FrameLayout.LayoutParams(-1, -1));
+        TextView label = text(String.valueOf(input.getHint()), 14, hint, false);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        label.setPadding(dp(4), 0, dp(4), 0);
+        label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        wrapper.addView(label, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
+        input.setContentDescription(input.getHint());
+        input.setHint(null);
+        input.setTag(label);
+        // The floated label pokes above the wrapper; the parent must not clip it.
+        wrapper.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {
+                if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).setClipChildren(false);
+            }
+            @Override public void onViewDetachedFromWindow(View v) { }
+        });
+        // Top half over whatever is behind the field, bottom half over the
+        // box: hides the border line behind the floated label.
+        android.graphics.drawable.Drawable patch = new android.graphics.drawable.Drawable() {
+            private final android.graphics.Paint paint = new android.graphics.Paint();
+            @Override public void draw(android.graphics.Canvas canvas) {
+                android.graphics.Rect b = getBounds();
+                paint.setColor(colorBehind(wrapper));
+                canvas.drawRect(b.left, b.top, b.right, b.exactCenterY(), paint);
+                paint.setColor(surface);
+                canvas.drawRect(b.left, b.exactCenterY(), b.right, b.bottom, paint);
+            }
+            @Override public void setAlpha(int alpha) { }
+            @Override public void setColorFilter(android.graphics.ColorFilter filter) { }
+            @Override public int getOpacity() { return android.graphics.PixelFormat.OPAQUE; }
+        };
+        boolean[] floated = {false};
+        Consumer<Boolean> place = animate -> {
+            if (wrapper.getHeight() == 0) return;
+            boolean up = input.hasFocus() || input.length() > 0;
+            // Text start of the input, relative to the wrapper.
+            float x = input.getPaddingLeft() - dp(4);
+            for (View v = input; v != wrapper && v != null; v = (View) v.getParent()) x += v.getLeft();
+            label.setX(x);
+            label.setPivotX(0);
+            label.setPivotY(label.getHeight() / 2f);
+            float y = up ? -label.getHeight() / 2f : (wrapper.getHeight() - label.getHeight()) / 2f;
+            float scale = up ? 0.8f : 1f;
+            label.setTextColor(up && input.hasFocus() ? accent : up ? secondary : hint);
+            label.setBackground(up ? patch : null);
+            if (animate && up != floated[0]) {
+                label.animate().y(y).scaleX(scale).scaleY(scale).setDuration(160)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            } else {
+                label.animate().cancel();
+                label.setY(y);
+                label.setScaleX(scale);
+                label.setScaleY(scale);
+            }
+            floated[0] = up;
+        };
+        wrapper.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> v.post(() -> place.accept(false)));
+        input.setOnFocusChangeListener((v, focus) -> place.accept(true));
+        bindText(input, v -> place.accept(true));
+        return wrapper;
+    }
+
+    // The fill of the nearest ancestor that paints one, else the page's.
+    private int colorBehind(View view) {
+        for (android.view.ViewParent p = view.getParent(); p instanceof View; p = p.getParent()) {
+            android.graphics.drawable.Drawable d = ((View) p).getBackground();
+            if (d instanceof android.graphics.drawable.ColorDrawable) {
+                return ((android.graphics.drawable.ColorDrawable) d).getColor();
+            }
+            if (d instanceof android.graphics.drawable.GradientDrawable
+                    && ((android.graphics.drawable.GradientDrawable) d).getColor() != null) {
+                return ((android.graphics.drawable.GradientDrawable) d).getColor().getDefaultColor();
+            }
+        }
+        return background;
+    }
+
+    private static void setFloatingLabel(EditText input, String value) {
+        if (input == null || !(input.getTag() instanceof TextView)) return;
+        ((TextView) input.getTag()).setText(value);
+        input.setContentDescription(value);
     }
 
     private EditText settingInput(String fieldHint, String value, int inputType) {
@@ -3197,14 +3334,10 @@ public final class MainActivity extends Activity {
             appendLog("Запрошена остановка: " + modeLabel(connectionMode));
             return;
         }
-        boolean isMax = "oneme".equals(transportType);
-        if (!isMax && !isValidDocumentUrl(documentUrl)) {
-            Toast.makeText(this, "Выберите или создайте профиль с корректной HTTPS-ссылкой", Toast.LENGTH_LONG).show();
-            showPage(PAGE_PROFILES);
-            return;
-        }
-        if (isMax && (maxToken == null || maxToken.isEmpty())) {
-            Toast.makeText(this, "Выберите или создайте профиль с MAX Web token", Toast.LENGTH_LONG).show();
+        String valueProblem = transportValueProblem(transportType,
+                "oneme".equals(transportType) ? (maxToken == null ? "" : maxToken) : documentUrl, isExitMode());
+        if (valueProblem != null) {
+            Toast.makeText(this, valueProblem, Toast.LENGTH_LONG).show();
             showPage(PAGE_PROFILES);
             return;
         }
@@ -3314,7 +3447,8 @@ public final class MainActivity extends Activity {
         if (state != null && !state.equals(lastAnnouncedState)) {
             if ("Подключено".equals(state) && isExitMode() && lastAnnouncedState != null
                     && lastAnnouncedState.startsWith("Ожидание")) {
-                JoinCelebrationView.play(root);
+                if (joinCelebration) JoinCelebrationView.play(root);
+                else vibrateSuccess();
                 appendLog("[SUCCESS] Клиент подключился к выходной ноде");
             } else if ("Подключено".equals(state)) {
                 vibrateSuccess();
