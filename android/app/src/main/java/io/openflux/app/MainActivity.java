@@ -188,6 +188,10 @@ public final class MainActivity extends Activity {
     private ProfileStore profileStore;
     private List<Profile> profiles = new ArrayList<>();
     private long selectedProfileId = -1;
+    // Material 3 "emphasized decelerate": quick start, long soft landing.
+    private static final android.view.animation.Interpolator EMPHASIZED =
+            new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
+    private ImageView proxyShareQr;
     // Exit mode: the home card with the QR clients scan to join this phone;
     // exitShareShown is the link (or error) it currently renders.
     private LinearLayout exitShareCard;
@@ -779,11 +783,13 @@ public final class MainActivity extends Activity {
         newView.setAlpha(0f);
         newView.setTranslationY(dp(8));
         content.addView(newView, new FrameLayout.LayoutParams(-1, -1));
-        newView.animate().alpha(1f).translationY(0f).setDuration(220).setStartDelay(40).start();
+        newView.animate().alpha(1f).translationY(0f).setDuration(280).setStartDelay(40)
+                .setInterpolator(EMPHASIZED).withLayer().start();
 
         for (View old : stale) {
             old.animate().cancel();
-            old.animate().alpha(0f).setDuration(140).withEndAction(() -> content.removeView(old)).start();
+            old.animate().alpha(0f).setDuration(140).withLayer()
+                    .withEndAction(() -> content.removeView(old)).start();
         }
     }
 
@@ -1327,8 +1333,8 @@ public final class MainActivity extends Activity {
     private void staggerIn(View view, int delayMs) {
         view.setAlpha(0f);
         view.setTranslationY(dp(14));
-        view.animate().alpha(1f).translationY(0f).setStartDelay(delayMs).setDuration(260)
-                .setInterpolator(new DecelerateInterpolator()).start();
+        view.animate().alpha(1f).translationY(0f).setStartDelay(delayMs).setDuration(320)
+                .setInterpolator(EMPHASIZED).withLayer().start();
     }
 
     private View buildLogsPage() {
@@ -1357,6 +1363,7 @@ public final class MainActivity extends Activity {
         logView.setPadding(dp(14), dp(12), dp(14), dp(12));
         logScroll = new ScrollView(this);
         logScroll.setFillViewport(true);
+        logScroll.setVerticalScrollBarEnabled(false);
         logScroll.setBackground(rounded(surface, border, 1, 10));
         logScroll.addView(logView, new ScrollView.LayoutParams(-1, -2));
         LinearLayout.LayoutParams logParams = new LinearLayout.LayoutParams(-1, 0, 1f);
@@ -1385,7 +1392,11 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams contentParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         contentParams.topMargin = dp(16);
         if (!showSave) contentParams.bottomMargin = dp(10);
-        page.addView(buildSettingsSubTabContent(), contentParams);
+        View subTab = buildSettingsSubTabContent();
+        // The pinned save button already clears the nav pill; the scroll
+        // needs no room of its own for it.
+        if (showSave && subTab instanceof ScrollView) subTab.setPadding(0, 0, 0, dp(8));
+        page.addView(subTab, contentParams);
 
         if (showSave) {
             Button save = primaryButton("Сохранить настройки", () -> {
@@ -1452,6 +1463,7 @@ public final class MainActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setPadding(0, 0, 0, navClearance());
+        scroll.setVerticalScrollBarEnabled(false);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.addView(settingsListRow(R.drawable.ic_swap, "Режим работы",
@@ -1460,7 +1472,7 @@ public final class MainActivity extends Activity {
                 "DNS-сервер и MTU", SETTINGS_NETWORK));
         list.addView(settingsListRow(R.drawable.ic_apps, "Приложения",
                 "Какие приложения используют туннель", SETTINGS_APPS));
-        list.addView(settingsListRow(R.drawable.ic_public, "Маршрутизация",
+        list.addView(settingsListRow(R.drawable.ic_routing, "Маршрутизация",
                 "Сайты и сервисы в обход туннеля", SETTINGS_ROUTING));
         list.addView(settingsListRow(R.drawable.ic_dark_mode, "Вид",
                 "Тема, логи и анимации", SETTINGS_INTERFACE));
@@ -1489,7 +1501,7 @@ public final class MainActivity extends Activity {
         row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setClickable(true);
         row.setFocusable(true);
-        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -1538,7 +1550,7 @@ public final class MainActivity extends Activity {
                 {"Туннель", "Весь трафик устройства"},
                 {"Прокси (SOCKS5)", "Без системного туннеля"},
                 {"Выходная нода (L4)", "Телефон выпускает клиентов в интернет"},
-        }, java.util.Arrays.asList(modes).indexOf(editorConnectionMode), i -> {
+        }, new int[]{R.drawable.ic_lock, R.drawable.ic_swap, R.drawable.ic_power}, java.util.Arrays.asList(modes).indexOf(editorConnectionMode), i -> {
             editorConnectionMode = modes[i];
             onModeChanged[0].run();
         });
@@ -1613,9 +1625,9 @@ public final class MainActivity extends Activity {
 
         proxyUsernameInput = settingInput("Логин", proxyUsername, InputType.TYPE_CLASS_TEXT);
         credentialsBlock.addView(iconTextField(R.drawable.ic_person, proxyUsernameInput, null),
-                new LinearLayout.LayoutParams(-1, dp(56)));
-        LinearLayout.LayoutParams passwordParams = new LinearLayout.LayoutParams(-1, dp(56));
-        passwordParams.topMargin = dp(8);
+                new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT)));
+        LinearLayout.LayoutParams passwordParams = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
+        passwordParams.topMargin = dp(4);
         credentialsBlock.addView(buildProxyPasswordField(), passwordParams);
 
         Button generateCreds = new Button(this);
@@ -1684,6 +1696,7 @@ public final class MainActivity extends Activity {
         lanSwitch.setOnCheckedChangeListener((button, checked) -> {
             tap(button);
             editorProxyLanAccess = checked;
+            if (proxyShareQr != null) setViewVisibleAnimated(proxyShareQr, checked);
             setViewVisibleAnimated(lanAddressHint, checked);
             setViewVisibleAnimated(authRow, checked);
             setViewVisibleAnimated(lanWarningHint, checked);
@@ -1773,9 +1786,13 @@ public final class MainActivity extends Activity {
         card.addView(copyButton, copyParams);
 
         Bitmap qr = generateQrBitmap(link, dp(180));
+        proxyShareQr = null;
         if (qr != null) {
+            // Only another device can scan it, which needs LAN access.
             ImageView qrView = new ImageView(this);
             qrView.setImageBitmap(qr);
+            setInitialVisibility(qrView, editorProxyLanAccess);
+            proxyShareQr = qrView;
             LinearLayout.LayoutParams qrParams = new LinearLayout.LayoutParams(dp(180), dp(180));
             qrParams.topMargin = dp(10);
             qrParams.gravity = Gravity.CENTER_HORIZONTAL;
@@ -1906,25 +1923,20 @@ public final class MainActivity extends Activity {
                 13, secondary, false);
         section.addView(intro, matchWrap());
 
-        LinearLayout.LayoutParams mainRepoParams = matchWrap();
-        mainRepoParams.topMargin = dp(20);
-        section.addView(aboutLinkRow(R.drawable.ic_github, "Основной репозиторий",
-                "p1neappleXpress/OpenFlux", MAIN_REPO_URL), mainRepoParams);
-
-        LinearLayout.LayoutParams forkParams = matchWrap();
-        forkParams.topMargin = dp(10);
-        section.addView(aboutLinkRow(R.drawable.ic_github, "Наш форк",
-                "damnurmum/OpenFlux-Android", FORK_REPO_URL), forkParams);
-
-        LinearLayout.LayoutParams telegramParams = matchWrap();
-        telegramParams.topMargin = dp(10);
-        section.addView(aboutLinkRow(R.drawable.ic_telegram, "Telegram чат",
-                "@openflux_chat", "https://t.me/openflux_chat"), telegramParams);
-
-        LinearLayout.LayoutParams discordParams = matchWrap();
-        discordParams.topMargin = dp(10);
-        section.addView(aboutLinkRow(R.drawable.ic_discord, "Discord",
-                "discord.gg/openfluxx", "https://discord.gg/8a4S3QAh62"), discordParams);
+        LinearLayout links = new LinearLayout(this);
+        links.setOrientation(LinearLayout.VERTICAL);
+        links.addView(aboutLinkRow(R.drawable.ic_github, "Основной репозиторий",
+                "p1neappleXpress/OpenFlux", MAIN_REPO_URL), matchWrap());
+        links.addView(aboutLinkRow(R.drawable.ic_github, "Наш форк",
+                "damnurmum/OpenFlux-Android", FORK_REPO_URL), matchWrap());
+        links.addView(aboutLinkRow(R.drawable.ic_telegram, "Telegram чат",
+                "@openflux_chat", "https://t.me/openflux_chat"), matchWrap());
+        links.addView(aboutLinkRow(R.drawable.ic_brand_discord, "Discord",
+                "discord.gg/openfluxx", "https://discord.gg/8a4S3QAh62"), matchWrap());
+        groupTiles(links);
+        LinearLayout.LayoutParams linksParams = matchWrap();
+        linksParams.topMargin = dp(20);
+        section.addView(links, linksParams);
         return section;
     }
 
@@ -1952,6 +1964,7 @@ public final class MainActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setPadding(0, 0, 0, navClearance());
+        scroll.setVerticalScrollBarEnabled(false);
         scroll.addView(sectionContent, new ScrollView.LayoutParams(-1, -2));
         return scroll;
     }
@@ -2098,8 +2111,7 @@ public final class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT);
         profileNameInput.setPadding(dp(16), 0, dp(16), 0);
         nameField.addView(profileNameInput, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, dp(56));
-        nameParams.topMargin = dp(8);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
         section.addView(floating(nameField, profileNameInput), nameParams);
 
         TextView iconLabel = label("ЗНАЧОК");
@@ -2142,15 +2154,15 @@ public final class MainActivity extends Activity {
         codecSection = codecBox;
         section.addView(codecBox, matchWrap());
 
-        LinearLayout.LayoutParams urlParams = new LinearLayout.LayoutParams(-1, dp(56));
-        urlParams.topMargin = dp(18);
+        LinearLayout.LayoutParams urlParams = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
+        urlParams.topMargin = dp(10);
         urlField = buildUrlField(initialUrl);
         // MAX has its own token field above; the link field would duplicate it.
         urlField.setVisibility("oneme".equals(editorTransportType) ? View.GONE : View.VISIBLE);
         section.addView(urlField, urlParams);
 
-        LinearLayout.LayoutParams encryptionParams = new LinearLayout.LayoutParams(-1, dp(56));
-        encryptionParams.topMargin = dp(16);
+        LinearLayout.LayoutParams encryptionParams = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
+        encryptionParams.topMargin = dp(8);
         section.addView(buildEncryptionField(initialSecret), encryptionParams);
         TextView encryptionHint = text("", 11, secondary, false);
         encryptionHintView = encryptionHint;
@@ -2196,9 +2208,6 @@ public final class MainActivity extends Activity {
             deleteParams.bottomMargin = dp(12);
             section.addView(delete, deleteParams);
         }
-        // Bottom breathing room so the last button doesn't sit flush against
-        // the bottom navigation bar when the page is scrolled all the way down.
-        section.addView(new View(this), new LinearLayout.LayoutParams(-1, dp(24)));
         return section;
     }
 
@@ -2399,8 +2408,8 @@ public final class MainActivity extends Activity {
         field.setBackground(rounded(surface, border, 1, 10));
         input.setPadding(dp(16), 0, dp(16), 0);
         field.addView(input, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(56));
-        params.topMargin = topMargin;
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
+        params.topMargin = Math.max(0, topMargin - dp(FLOAT_ROOM));
         parent.addView(floating(field, input), params);
     }
 
@@ -2460,7 +2469,8 @@ public final class MainActivity extends Activity {
                 {"Mail.ru Docs", "Документ в Облаке Mail.ru"},
                 {"Cups.online", "Комнаты live-coding, код комнат с ноды"},
                 {"MAX (OneMe)", "Звонок MAX, нужен Web token"},
-        }, current, i -> {
+        }, new int[]{R.drawable.ic_brand_yandex, R.drawable.ic_brand_yandex, R.drawable.ic_brand_yandex,
+                R.drawable.ic_brand_mailru, R.drawable.ic_code, R.drawable.ic_brand_max}, current, i -> {
             editorTransportType = types[i];
             if (maxFieldsContainer != null) {
                 maxFieldsContainer.setVisibility("oneme".equals(editorTransportType) ? View.VISIBLE : View.GONE);
@@ -2482,8 +2492,7 @@ public final class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         maxTokenInput.setPadding(dp(16), 0, dp(16), 0);
         tokenField.addView(maxTokenInput, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout.LayoutParams tokenParams = new LinearLayout.LayoutParams(-1, dp(56));
-        tokenParams.topMargin = dp(8);
+        LinearLayout.LayoutParams tokenParams = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
         box.addView(floating(tokenField, maxTokenInput), tokenParams);
 
         FrameLayout uidField = new FrameLayout(this);
@@ -2492,8 +2501,8 @@ public final class MainActivity extends Activity {
                 InputType.TYPE_CLASS_NUMBER);
         maxUidInput.setPadding(dp(16), 0, dp(16), 0);
         uidField.addView(maxUidInput, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout.LayoutParams uidParams = new LinearLayout.LayoutParams(-1, dp(56));
-        uidParams.topMargin = dp(16);
+        LinearLayout.LayoutParams uidParams = new LinearLayout.LayoutParams(-1, dp(FIELD_HEIGHT));
+        uidParams.topMargin = dp(8);
         box.addView(floating(uidField, maxUidInput), uidParams);
 
         return box;
@@ -2503,7 +2512,7 @@ public final class MainActivity extends Activity {
         return choiceList(new String[][]{
                 {"Batched + zstd", "По умолчанию"},
                 {"Legacy (LZ4)", "Для совместимости со старым exit-node"},
-        }, "legacy".equals(editorCodec) ? 1 : 0, i -> editorCodec = i == 1 ? "legacy" : "batched");
+        }, new int[]{R.drawable.ic_codec_fast, R.drawable.ic_codec_legacy}, "legacy".equals(editorCodec) ? 1 : 0, i -> editorCodec = i == 1 ? "legacy" : "batched");
     }
 
     private View buildNetworkSettings() {
@@ -2617,19 +2626,22 @@ public final class MainActivity extends Activity {
             section.addView(tunnelNote, tunnelNoteParams);
         }
 
-        for (int i = 0; i < DomainFilter.PRESETS.length; i++) {
-            DomainFilter.Preset preset = DomainFilter.PRESETS[i];
-            Switch presetSwitch = settingSwitch(R.drawable.ic_public, preset.title, preset.description,
+        LinearLayout presets = new LinearLayout(this);
+        presets.setOrientation(LinearLayout.VERTICAL);
+        for (DomainFilter.Preset preset : DomainFilter.PRESETS) {
+            Switch presetSwitch = settingSwitch(presetIcon(preset.id), preset.title, preset.description,
                     editorEnabledDomainPresets.contains(preset.id));
             presetSwitch.setOnCheckedChangeListener((button, checked) -> {
                 tap(button);
                 if (checked) editorEnabledDomainPresets.add(preset.id);
                 else editorEnabledDomainPresets.remove(preset.id);
             });
-            LinearLayout.LayoutParams presetParams = matchWrap();
-            presetParams.topMargin = i == 0 ? dp(12) : dp(8);
-            section.addView((View) presetSwitch.getTag(), presetParams);
+            presets.addView((View) presetSwitch.getTag(), matchWrap());
         }
+        groupTiles(presets);
+        LinearLayout.LayoutParams presetsParams = matchWrap();
+        presetsParams.topMargin = dp(12);
+        section.addView(presets, presetsParams);
 
         LinearLayout.LayoutParams customLabelParams = matchWrap();
         customLabelParams.topMargin = dp(16);
@@ -2652,6 +2664,16 @@ public final class MainActivity extends Activity {
         section.addView(fieldHint("По одному домену на строку, без http:// и путей - например youtube.com."));
 
         return section;
+    }
+
+    private static int presetIcon(String id) {
+        switch (id) {
+            case "ru": return R.drawable.ic_brand_ru;
+            case "youtube": return R.drawable.ic_brand_youtube;
+            case "discord": return R.drawable.ic_brand_discord;
+            case "ai": return R.drawable.ic_brand_openai;
+            default: return R.drawable.ic_public;
+        }
     }
 
     private void applyRoutingSettings() {
@@ -2684,22 +2706,23 @@ public final class MainActivity extends Activity {
 
     private View buildInterfaceSettings() {
         LinearLayout section = page();
+        LinearLayout group = new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        section.addView(group, matchWrap());
         Switch themeSwitch = settingSwitch(R.drawable.ic_dark_mode, "Тёмная тема",
                 "До первого выбора используется тема телефона", editorDarkMode);
         themeSwitch.setOnCheckedChangeListener((button, checked) -> {
             tap(button);
             editorDarkMode = checked;
         });
-        section.addView((View) themeSwitch.getTag());
+        group.addView((View) themeSwitch.getTag(), matchWrap());
         Switch scrollSwitch = settingSwitch(R.drawable.ic_terminal, "Автопрокрутка логов",
                 "Показывать последние события", editorAutoScroll);
         scrollSwitch.setOnCheckedChangeListener((button, checked) -> {
             tap(button);
             editorAutoScroll = checked;
         });
-        LinearLayout.LayoutParams scrollSettingParams = matchWrap();
-        scrollSettingParams.topMargin = dp(8);
-        section.addView((View) scrollSwitch.getTag(), scrollSettingParams);
+        group.addView((View) scrollSwitch.getTag(), matchWrap());
 
         Switch showSensitiveSwitch = settingSwitch(R.drawable.ic_lock, "Данные в логах",
                 "Показывать ссылки, IP и WSS адреса. При выключении скрываются под HIDDEN-URL",
@@ -2708,9 +2731,7 @@ public final class MainActivity extends Activity {
             tap(button);
             editorShowSensitiveLogs = checked;
         });
-        LinearLayout.LayoutParams showSensitiveParams = matchWrap();
-        showSensitiveParams.topMargin = dp(8);
-        section.addView((View) showSensitiveSwitch.getTag(), showSensitiveParams);
+        group.addView((View) showSensitiveSwitch.getTag(), matchWrap());
 
         Switch celebrationSwitch = settingSwitch(R.drawable.ic_check, "Салют при подключении клиента",
                 "Режим выходной ноды: вспышка, конфетти и вибрация, когда к телефону подключается клиент",
@@ -2719,9 +2740,8 @@ public final class MainActivity extends Activity {
             tap(button);
             editorJoinCelebration = checked;
         });
-        LinearLayout.LayoutParams celebrationParams = matchWrap();
-        celebrationParams.topMargin = dp(8);
-        section.addView((View) celebrationSwitch.getTag(), celebrationParams);
+        group.addView((View) celebrationSwitch.getTag(), matchWrap());
+        groupTiles(group);
         return section;
     }
 
@@ -2739,7 +2759,7 @@ public final class MainActivity extends Activity {
                 {"Все приложения"},
                 {"Только выбранные", "Белый список"},
                 {"Все, кроме выбранных", "Чёрный список"},
-        }, Math.max(0, java.util.Arrays.asList(filterModes).indexOf(editorAppFilterMode)), i -> {
+        }, null, Math.max(0, java.util.Arrays.asList(filterModes).indexOf(editorAppFilterMode)), i -> {
             editorAppFilterMode = filterModes[i];
             onFilterChanged[0].run();
         });
@@ -2756,7 +2776,8 @@ public final class MainActivity extends Activity {
         ListView appListView = new ListView(this);
         appListView.setDivider(null);
         appListView.setClipToPadding(false);
-        appListView.setPadding(0, 0, 0, navClearance());
+        appListView.setPadding(0, 0, 0, dp(8));
+        appListView.setVerticalScrollBarEnabled(false);
         appListView.setAdapter(new AppListAdapter(loadInstalledAppsCached()));
         listContainer.addView(appListView, new LinearLayout.LayoutParams(-1, -1));
         section.addView(listContainer, listContainerParams);
@@ -2767,18 +2788,37 @@ public final class MainActivity extends Activity {
         return section;
     }
 
+    // Shows or hides view with a fade while everything below it slides to
+    // its new place, instead of the neighbors jumping when it goes GONE.
     private void setViewVisibleAnimated(View view, boolean visible) {
         view.animate().cancel();
-        if (visible) {
-            view.setVisibility(View.VISIBLE);
-            view.setAlpha(0f);
-            view.setTranslationY(dp(10));
-            view.animate().alpha(1f).translationY(0f).setDuration(220)
-                    .setInterpolator(new DecelerateInterpolator()).start();
-        } else {
-            view.animate().alpha(0f).translationY(dp(10)).setDuration(150)
-                    .withEndAction(() -> view.setVisibility(View.GONE)).start();
+        view.setAlpha(1f);
+        view.setTranslationY(0f);
+        if ((view.getVisibility() == View.VISIBLE) == visible) return;
+        ViewGroup sceneRoot = transitionRoot(view);
+        if (sceneRoot != null) {
+            android.transition.TransitionSet transition = new android.transition.TransitionSet()
+                    .setOrdering(android.transition.TransitionSet.ORDERING_TOGETHER)
+                    .addTransition(new android.transition.Fade())
+                    .addTransition(new android.transition.ChangeBounds());
+            transition.setDuration(280);
+            transition.setInterpolator(EMPHASIZED);
+            // One transition per frame: later calls in the same toggle are
+            // captured by the first.
+            android.transition.TransitionManager.beginDelayedTransition(sceneRoot, transition);
         }
+        view.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    // The scrolling page content that holds view, so the whole page
+    // reflows together.
+    private ViewGroup transitionRoot(View view) {
+        View child = view;
+        for (android.view.ViewParent p = view.getParent(); p instanceof ViewGroup; p = p.getParent()) {
+            if (p instanceof ScrollView || p == content) return child instanceof ViewGroup ? (ViewGroup) child : null;
+            child = (View) p;
+        }
+        return null;
     }
 
     // accent laid over surface at the given strength: the tonal fill of a
@@ -2803,6 +2843,25 @@ public final class MainActivity extends Activity {
     private float[] radii(int radius) {
         float r = dp(radius);
         return new float[]{r, r, r, r, r, r, r, r};
+    }
+
+    // A brand logo (resources named ic_brand_*) on a neutral circle in its
+    // own colors, anything else on a tonal circle tinted with the accent.
+    private View leadingIcon(int iconRes) {
+        String name = getResources().getResourceEntryName(iconRes);
+        if (!name.startsWith("ic_brand_")) return iconBubble(iconRes);
+        FrameLayout bubble = new FrameLayout(this);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(darkMode ? Color.rgb(36, 41, 54) : Color.rgb(240, 242, 246));
+        bubble.setBackground(circle);
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(iconRes);
+        // OpenAI's mark is monochrome: it follows the text color.
+        if (name.equals("ic_brand_openai")) logo.setImageTintList(ColorStateList.valueOf(text));
+        int size = name.equals("ic_brand_ru") ? dp(28) : dp(24);
+        bubble.addView(logo, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+        return bubble;
     }
 
     // Icon on a tonal circle, as in the Android 15-16 settings lists.
@@ -2834,14 +2893,15 @@ public final class MainActivity extends Activity {
     // Material 3 switch: a 56x32 pill track; off, an outlined track with a
     // small thumb; on, a filled track with a large thumb carrying a check.
     private void styleSwitch(Switch toggle) {
-        int off = darkMode ? Color.rgb(140, 147, 160) : Color.rgb(116, 119, 127);
+        // Off state leans toward the accent so the light theme is not a flat grey.
+        int off = darkMode ? Color.rgb(140, 147, 160) : tonal(0.55f);
         GradientDrawable trackOn = new GradientDrawable();
         trackOn.setCornerRadius(dp(16));
         trackOn.setColor(accent);
         trackOn.setSize(dp(56), dp(32));
         GradientDrawable trackOff = new GradientDrawable();
         trackOff.setCornerRadius(dp(16));
-        trackOff.setColor(background);
+        trackOff.setColor(darkMode ? background : tonal(0.07f));
         trackOff.setStroke(dp(2), off);
         trackOff.setSize(dp(56), dp(32));
         android.graphics.drawable.StateListDrawable track = new android.graphics.drawable.StateListDrawable();
@@ -2914,7 +2974,7 @@ public final class MainActivity extends Activity {
     // Single choice as stacked tiles, Android 15-16 style: the group has
     // large outer corners and small inner ones, the picked tile gets a tonal
     // fill and a check. options[i] is {title} or {title, subtitle}.
-    private View choiceList(String[][] options, int selected, java.util.function.IntConsumer onPick) {
+    private View choiceList(String[][] options, int[] icons, int selected, java.util.function.IntConsumer onPick) {
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         int n = options.length;
@@ -2935,8 +2995,8 @@ public final class MainActivity extends Activity {
                     check.setVisibility(View.VISIBLE);
                     check.setScaleX(0f);
                     check.setScaleY(0f);
-                    check.animate().scaleX(1f).scaleY(1f).setDuration(220)
-                            .setInterpolator(new OvershootInterpolator()).start();
+                    check.animate().scaleX(1f).scaleY(1f).setDuration(260)
+                            .setInterpolator(new OvershootInterpolator(1.6f)).start();
                 } else if (!on) {
                     check.setVisibility(View.INVISIBLE);
                 }
@@ -2948,6 +3008,12 @@ public final class MainActivity extends Activity {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setMinimumHeight(dp(60));
             row.setPadding(dp(18), dp(12), dp(16), dp(12));
+            if (icons != null && icons[i] != 0) {
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+                iconParams.rightMargin = dp(14);
+                row.addView(leadingIcon(icons[i]), iconParams);
+                row.setPadding(dp(14), dp(12), dp(16), dp(12));
+            }
             LinearLayout copy = new LinearLayout(this);
             copy.setOrientation(LinearLayout.VERTICAL);
             titles[i] = text(options[i][0], 15, text, true);
@@ -3231,7 +3297,7 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(14), dp(16), dp(14));
         row.setBackground(tile(surface, border, radii(20)));
-        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -3247,7 +3313,7 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(10), dp(10), dp(10));
         row.setBackground(tile(surface, border, radii(20)));
-        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         TextView title = text(labelValue, 14, text, false);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
         titleParams.leftMargin = dp(12);
@@ -3261,7 +3327,7 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setBackground(tile(surface, border, radii(20)));
-        row.addView(iconBubble(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        row.addView(leadingIcon(iconRes), new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, -2, 1f);
@@ -3284,8 +3350,11 @@ public final class MainActivity extends Activity {
     // The input's hint becomes the label; setFloatingLabel changes it later.
     private View floating(View box, EditText input) {
         FrameLayout wrapper = new FrameLayout(this);
-        wrapper.setClipChildren(false);
-        wrapper.addView(box, new FrameLayout.LayoutParams(-1, -1));
+        // FLOAT_ROOM above the box holds the upper half of the floated label,
+        // so it never pokes out under a neighbor.
+        FrameLayout.LayoutParams boxParams = new FrameLayout.LayoutParams(-1, -1);
+        boxParams.topMargin = dp(FLOAT_ROOM);
+        wrapper.addView(box, boxParams);
         TextView label = text(String.valueOf(input.getHint()), 14, hint, false);
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
@@ -3295,13 +3364,6 @@ public final class MainActivity extends Activity {
         input.setContentDescription(input.getHint());
         input.setHint(null);
         input.setTag(label);
-        // The floated label pokes above the wrapper; the parent must not clip it.
-        wrapper.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
-            @Override public void onViewAttachedToWindow(View v) {
-                if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).setClipChildren(false);
-            }
-            @Override public void onViewDetachedFromWindow(View v) { }
-        });
         // Top half over whatever is behind the field, bottom half over the
         // box: hides the border line behind the floated label.
         android.graphics.drawable.Drawable patch = new android.graphics.drawable.Drawable() {
@@ -3318,27 +3380,43 @@ public final class MainActivity extends Activity {
             @Override public int getOpacity() { return android.graphics.PixelFormat.OPAQUE; }
         };
         boolean[] floated = {false};
+        boolean[] sliding = {false};
         Consumer<Boolean> place = animate -> {
             if (wrapper.getHeight() == 0) return;
             boolean up = input.hasFocus() || input.length() > 0;
+            label.setTextColor(up && input.hasFocus() ? accent : up ? secondary : hint);
+            // A layout pass (the keyboard opening) must not cut a slide short.
+            if (sliding[0] && (!animate || up == floated[0])) return;
             // Text start of the input, relative to the wrapper.
             float x = input.getPaddingLeft() - dp(4);
             for (View v = input; v != wrapper && v != null; v = (View) v.getParent()) x += v.getLeft();
             label.setX(x);
+            // Resting, the label must stop where the text does (before an eye
+            // button); floated, it is scaled down and fits anyway.
+            int textRight = (int) (x + dp(4) + input.getWidth() - input.getPaddingLeft() - input.getPaddingRight());
+            label.setMaxWidth(Math.max(dp(40), textRight - (int) x + dp(4)));
             label.setPivotX(0);
             label.setPivotY(label.getHeight() / 2f);
-            float y = up ? -label.getHeight() / 2f : (wrapper.getHeight() - label.getHeight()) / 2f;
+            float room = dp(FLOAT_ROOM);
+            float y = up ? room - label.getHeight() / 2f
+                    : room + (wrapper.getHeight() - room - label.getHeight()) / 2f;
             float scale = up ? 0.8f : 1f;
-            label.setTextColor(up && input.hasFocus() ? accent : up ? secondary : hint);
-            label.setBackground(up ? patch : null);
             if (animate && up != floated[0]) {
-                label.animate().y(y).scaleX(scale).scaleY(scale).setDuration(160)
-                        .setInterpolator(new DecelerateInterpolator()).start();
+                sliding[0] = true;
+                // The patch only belongs on the border: drop it before sliding
+                // down, add it once the label has landed up there.
+                if (!up) label.setBackground(null);
+                label.animate().y(y).scaleX(scale).scaleY(scale).setDuration(220)
+                        .setInterpolator(EMPHASIZED)
+                        .withEndAction(() -> {
+                            sliding[0] = false;
+                            label.setBackground(up ? patch : null);
+                        }).start();
             } else {
-                label.animate().cancel();
                 label.setY(y);
                 label.setScaleX(scale);
                 label.setScaleY(scale);
+                label.setBackground(up ? patch : null);
             }
             floated[0] = up;
         };
@@ -3362,6 +3440,10 @@ public final class MainActivity extends Activity {
         }
         return background;
     }
+
+    private static final int FLOAT_ROOM = 8;
+    // Height of a field wrapped by floating(): the 56dp box plus FLOAT_ROOM.
+    private static final int FIELD_HEIGHT = 56 + FLOAT_ROOM;
 
     private static void setFloatingLabel(EditText input, String value) {
         if (input == null || !(input.getTag() instanceof TextView)) return;
@@ -3957,14 +4039,17 @@ public final class MainActivity extends Activity {
         view.setScaleX(1f);
         view.setScaleY(1f);
         ObjectAnimator shrink = ObjectAnimator.ofPropertyValuesHolder(view,
-                PropertyValuesHolder.ofFloat(View.SCALE_X, 0.96f),
-                PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.96f));
-        shrink.setDuration(80);
+                PropertyValuesHolder.ofFloat(View.SCALE_X, 0.97f),
+                PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.97f));
+        shrink.setDuration(90);
+        shrink.setInterpolator(new DecelerateInterpolator());
         ObjectAnimator grow = ObjectAnimator.ofPropertyValuesHolder(view,
                 PropertyValuesHolder.ofFloat(View.SCALE_X, 1f),
                 PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f));
-        grow.setDuration(140);
-        grow.setInterpolator(new OvershootInterpolator(3f));
+        // No overshoot: growing past 1 pushed views under their neighbors
+        // and past the edges of clipping parents.
+        grow.setDuration(220);
+        grow.setInterpolator(EMPHASIZED);
         AnimatorSet set = new AnimatorSet();
         set.playSequentially(shrink, grow);
         set.addListener(new AnimatorListenerAdapter() {
