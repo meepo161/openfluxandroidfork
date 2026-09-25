@@ -442,7 +442,11 @@ public final class NodeWizardActivity extends Activity {
                 String pending = Mobile.pendingCaptchaURL();
                 if (!pending.isEmpty() && !shown) {
                     shown = true;
-                    setStatus("Нода просит пройти проверку Яндекса", false);
+                    // A proxy means the check is the node's, shown from its
+                    // address; otherwise Yandex is checking this phone.
+                    setStatus(Mobile.pendingCaptchaProxy().isEmpty()
+                            ? "Яндекс просит проверку у этого телефона"
+                            : "Нода просит пройти проверку Яндекса", false);
                     startActivity(new Intent(NodeWizardActivity.this, CaptchaActivity.class));
                 } else if (pending.isEmpty()) {
                     shown = false;
