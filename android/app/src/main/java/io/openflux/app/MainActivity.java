@@ -93,6 +93,8 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.WriterException;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 import org.json.JSONObject;
 
@@ -186,6 +188,10 @@ public final class MainActivity extends Activity {
     private ProfileStore profileStore;
     private List<Profile> profiles = new ArrayList<>();
     private long selectedProfileId = -1;
+    // Exit mode: the home card with the QR clients scan to join this phone;
+    // exitShareShown is the link (or error) it currently renders.
+    private LinearLayout exitShareCard;
+    private String exitShareShown;
     private boolean profileEditorOpen;
     private Long editingProfileId;
     private String editorIcon = "ic_public";
@@ -309,6 +315,55 @@ public final class MainActivity extends Activity {
         appendLog("Готово. При первом запуске Android запросит разрешение на туннель.");
         checkForUpdates();
         requestNotificationPermissionIfNeeded();
+        handleShareIntent(getIntent());
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleShareIntent(intent);
+    }
+
+    private void handleShareIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction()) || intent.getData() == null) return;
+        importShareLink(intent.getData().toString());
+        // Not again on a configuration change.
+        intent.setAction(Intent.ACTION_MAIN);
+    }
+
+    private void scanShareQr() {
+        new IntentIntegrator(this)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt("Наведите камеру на QR-код OpenFlux")
+                .setBeepEnabled(false)
+                .setOrientationLocked(false)
+                .initiateScan();
+    }
+
+    // Turns an openflux:// link into a profile after the user confirms: the
+    // link carries the exit's key, so nothing is saved silently.
+    private void importShareLink(String link) {
+        Profile p;
+        try {
+            p = Profile.fromShare(new JSONObject(Mobile.parseShareLink(link.trim())));
+        } catch (Exception e) {
+            Toast.makeText(this, "Не удалось прочитать QR: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this, darkMode
+                ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+                : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                .setTitle("Добавить профиль?")
+                .setMessage(p.name + "\n" + profileTransportSummary(p)
+                        + "\n\nВ коде ключ шифрования ноды: добавляйте QR только от тех, кому доверяете.")
+                .setPositiveButton("Добавить", (dialog, which) -> {
+                    profiles.add(p);
+                    profileStore.save(profiles);
+                    selectProfile(p.id);
+                    appendLog("Профиль «" + p.name + "» добавлен по QR");
+                    Toast.makeText(this, "Профиль добавлен", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 
     // Android 13+ requires this runtime permission to actually display any
@@ -1109,7 +1164,96 @@ public final class MainActivity extends Activity {
         activeParamsParams.bottomMargin = dp(8);
         page.addView(activeParams, activeParamsParams);
         staggerIn(activeParams, 130);
+
+        exitShareCard = null;
+        exitShareShown = null;
+        if (MODE_EXIT.equals(connectionMode)) {
+            exitShareCard = new LinearLayout(this);
+            exitShareCard.setOrientation(LinearLayout.VERTICAL);
+            exitShareCard.setGravity(Gravity.CENTER_HORIZONTAL);
+            exitShareCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+            exitShareCard.setBackground(rounded(surface, border, 1, 11));
+            exitShareCard.setVisibility(View.GONE);
+            LinearLayout.LayoutParams shareParams = matchWrap();
+            shareParams.topMargin = dp(16);
+            shareParams.bottomMargin = dp(8);
+            page.addView(exitShareCard, shareParams);
+            refreshExitShareCard();
+        }
         return wrapScroll(page);
+    }
+
+    // Shows the QR (link and image both come from the core) while the exit
+    // runs; rebuilt only when the link changes, e.g. a new Wi-Fi address.
+    private void refreshExitShareCard() {
+        if (exitShareCard == null) return;
+        String link = null;
+        String error = null;
+        if (OpenFluxExitService.isRunning()) {
+            String ip = getLocalIpAddress();
+            try {
+                link = Mobile.exitShareLink(ip != null ? ip : "", "OpenFlux " + Build.MODEL);
+            } catch (Exception e) {
+                error = e.getMessage();
+            }
+        }
+        String shown = link != null ? link : error;
+        if (java.util.Objects.equals(shown, exitShareShown)) return;
+        exitShareShown = shown;
+        exitShareCard.removeAllViews();
+        if (shown == null) {
+            exitShareCard.setVisibility(View.GONE);
+            return;
+        }
+        exitShareCard.addView(text("ПОДКЛЮЧЕНИЕ ПО QR", 11, secondary, true));
+        if (link == null) {
+            TextView problem = text("QR недоступен: " + error, 13, text, false);
+            LinearLayout.LayoutParams problemParams = matchWrap();
+            problemParams.topMargin = dp(6);
+            exitShareCard.addView(problem, problemParams);
+        } else {
+            try {
+                byte[] png = Mobile.shareQRPNG(link, dp(220));
+                ImageView qrView = new ImageView(this);
+                qrView.setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(png, 0, png.length));
+                qrView.setBackground(rounded(Color.WHITE, Color.WHITE, 0, 12));
+                qrView.setPadding(dp(6), dp(6), dp(6), dp(6));
+                LinearLayout.LayoutParams qrParams = new LinearLayout.LayoutParams(dp(232), dp(232));
+                qrParams.topMargin = dp(10);
+                exitShareCard.addView(qrView, qrParams);
+            } catch (Exception e) {
+                exitShareCard.addView(text("QR недоступен: " + e.getMessage(), 13, text, false), matchWrap());
+            }
+            TextView hint = text("Отсканируйте в OpenFlux на другом телефоне: Профили, кнопка QR. "
+                    + "В коде ключ шифрования, показывайте только своим.", 12, secondary, false);
+            hint.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams hintParams = matchWrap();
+            hintParams.topMargin = dp(10);
+            exitShareCard.addView(hint, hintParams);
+            Button copyButton = new Button(this);
+            copyButton.setText("Копировать ссылку");
+            copyButton.setAllCaps(false);
+            copyButton.setTextColor(accent);
+            copyButton.setTextSize(13);
+            copyButton.setStateListAnimator(null);
+            copyButton.setBackground(ripple(Color.TRANSPARENT, 9));
+            String copied = link;
+            copyButton.setOnClickListener(v -> {
+                bounce(v);
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("OpenFlux", copied));
+                Toast.makeText(this, "Ссылка скопирована", Toast.LENGTH_SHORT).show();
+            });
+            exitShareCard.addView(copyButton, new LinearLayout.LayoutParams(-1, dp(40)));
+        }
+        if (exitShareCard.getVisibility() != View.VISIBLE) {
+            exitShareCard.setVisibility(View.VISIBLE);
+            exitShareCard.setScaleX(0.9f);
+            exitShareCard.setScaleY(0.9f);
+            exitShareCard.setAlpha(0f);
+            exitShareCard.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(320)
+                    .setInterpolator(new OvershootInterpolator()).start();
+        }
     }
 
     private String[][] activeParamRows() {
@@ -1847,6 +1991,14 @@ public final class MainActivity extends Activity {
         titles.addView(text("Профили", 25, text, true));
         titles.addView(text("Наборы параметров для разных серверов", 12, secondary, false), matchWrap());
         header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        ImageButton scanButton = iconButton(R.drawable.ic_qr_scan, "Сканировать QR");
+        scanButton.setOnClickListener(v -> {
+            tap(v);
+            scanShareQr();
+        });
+        LinearLayout.LayoutParams scanParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        scanParams.rightMargin = dp(8);
+        header.addView(scanButton, scanParams);
         ImageButton addButton = iconButton(R.drawable.ic_add, "Добавить профиль");
         addButton.setOnClickListener(v -> {
             tap(v);
@@ -3086,6 +3238,11 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        IntentResult scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (scan != null) {
+            if (scan.getContents() != null) importShareLink(scan.getContents());
+            return;
+        }
         if (requestCode == TUNNEL_PERMISSION_REQUEST && resultCode == RESULT_OK) startTunnel();
         else if (requestCode == TUNNEL_PERMISSION_REQUEST) appendLog("[ERROR] Разрешение на создание туннеля не выдано");
     }
@@ -3155,7 +3312,11 @@ public final class MainActivity extends Activity {
         }
 
         if (state != null && !state.equals(lastAnnouncedState)) {
-            if ("Подключено".equals(state)) {
+            if ("Подключено".equals(state) && isExitMode() && lastAnnouncedState != null
+                    && lastAnnouncedState.startsWith("Ожидание")) {
+                JoinCelebrationView.play(root);
+                appendLog("[SUCCESS] Клиент подключился к выходной ноде");
+            } else if ("Подключено".equals(state)) {
                 vibrateSuccess();
                 appendLog("[SUCCESS] Подключено (" + modeLabel(connectionMode) + ")");
             } else if ("Ошибка".equals(state)) {
@@ -3203,6 +3364,8 @@ public final class MainActivity extends Activity {
         if (tunnelPowerIcon != null) {
             tunnelPowerIcon.setImageTintList(ColorStateList.valueOf(contentColor));
         }
+
+        refreshExitShareCard();
 
         String error = connectionLastError();
         if (error != null && !error.isEmpty() && !error.equals(lastShownError)) {

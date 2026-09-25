@@ -30,6 +30,9 @@ final class Profile {
 
     boolean session;
     int priority = 50;
+    // Session encryption context (the exit's --url), set by an imported
+    // openflux:// link; empty means the bridge derives it from the transports.
+    String context = "";
     final List<Transport> extraTransports = new ArrayList<>();
 
     // One extra carrier of a Session profile.
@@ -63,6 +66,7 @@ final class Profile {
         o.put("maxUid", maxUid);
         o.put("session", session);
         o.put("priority", priority);
+        o.put("context", context);
         JSONArray extras = new JSONArray();
         for (Transport t : extraTransports) {
             extras.put(new JSONObject()
@@ -88,6 +92,7 @@ final class Profile {
         p.maxUid = o.optString("maxUid", "");
         p.session = o.optBoolean("session", false);
         p.priority = o.optInt("priority", 50);
+        p.context = o.optString("context", "");
         JSONArray extras = o.optJSONArray("extraTransports");
         for (int i = 0; extras != null && i < extras.length(); i++) {
             JSONObject e = extras.optJSONObject(i);
@@ -142,7 +147,46 @@ final class Profile {
         String mainValue = "oneme".equals(transportType) ? maxToken : documentUrl;
         out.put(spec(seen, transportType, mainValue, maxUid, priority));
         for (Transport t : extraTransports) out.put(spec(seen, t.type, t.value, t.uid, t.priority));
-        return out.toString();
+        if (context.isEmpty()) return out.toString();
+        return new JSONObject().put("context", context).put("transports", out).toString();
+    }
+
+    // Builds a profile from an openflux:// link's configuration (the JSON
+    // Mobile.parseShareLink returns). The highest-priority non-direct
+    // transport becomes the main one, the rest become Session extras.
+    static Profile fromShare(JSONObject c) throws JSONException {
+        JSONArray ts = c.getJSONArray("transports");
+        List<JSONObject> sorted = new ArrayList<>();
+        for (int i = 0; i < ts.length(); i++) sorted.add(ts.getJSONObject(i));
+        sorted.sort((a, b) -> Integer.compare(b.optInt("priority"), a.optInt("priority")));
+        JSONObject main = sorted.get(0);
+        for (JSONObject t : sorted) {
+            if (!"direct".equals(t.optString("type"))) { main = t; break; }
+        }
+        Profile p = new Profile();
+        p.id = System.currentTimeMillis();
+        p.name = c.optString("name", "");
+        if (p.name.isEmpty()) p.name = "OpenFlux";
+        p.session = c.optBoolean("negotiate", false);
+        p.encryptionSecret = c.optString("secret", "");
+        p.codec = "legacy".equals(c.optString("codec")) ? "legacy" : "batched";
+        p.context = p.session ? c.optString("context", "") : "";
+        p.transportType = main.getString("type");
+        p.documentUrl = shareValue(main);
+        p.priority = main.optInt("priority", 50);
+        for (JSONObject t : sorted) {
+            if (t == main) continue;
+            Transport x = new Transport();
+            x.type = t.getString("type");
+            x.value = shareValue(t);
+            x.priority = t.optInt("priority", 0);
+            p.extraTransports.add(x);
+        }
+        return p;
+    }
+
+    private static String shareValue(JSONObject t) {
+        return "direct".equals(t.optString("type")) ? t.optString("dial") : t.optString("url");
     }
 
     private static JSONObject spec(Map<String, Integer> seen, String type, String value, String uid,
