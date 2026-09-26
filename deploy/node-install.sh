@@ -36,11 +36,11 @@
 set -u
 umask 077
 
-CORE_VERSION="node-v1.2.2"
+CORE_VERSION="node-v1.2.3"
 CORE_BASE="https://github.com/meepo161/openfluxandroidfork/releases/download/$CORE_VERSION"
-SHA_amd64="e2f3d840d2a439eef9759d453faa52d002e9c234f939ba7441a19b1f5b41cc01"
-SHA_arm64="635bbe65b640e982ff030e4ee768fdc1f5f5476629cfb36389bcdb47d33fb0fc"
-SHA_arm="dfd8dad77162567d54e27d5fc13317b4cdc6bd3ec67d91b6d7abb7f99997e94a"
+SHA_amd64="e44152f19fa48ec4082a406c509896de99d7d403b5a681a101c6f807419ca7e6"
+SHA_arm64="0b7ec511c3e4c9875d85dbc3c54be20e26906a5a409ce6b97ace31d2ccb14328"
+SHA_arm="3cb0b4c0db5a021cae46fad14d9c0e4fbdea382c69211128730b3656dd9f2900"
 
 BIN_DIR="/opt/openflux-node/bin"
 CONF_ROOT="/etc/openflux-node"
